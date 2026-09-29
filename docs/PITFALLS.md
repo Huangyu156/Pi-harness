@@ -70,6 +70,7 @@
 | 新建的会话过一阵突然从左侧栏消失（点「＋」/重启后又回来） | 四 · 会话目录写穿：行存不存在不能依赖内存（2026-09-21） |
 | 左栏会话标题在项目目录名（如 `percho`）与首条用户消息之间反复切换 | 四 · 同章节「名称也要写回目录投影」（2026-09-22） |
 | 会话压缩后当时历史还在，过段时间重新打开却只剩压缩后的内容 | 四 · UI 历史不能读取被压缩的模型上下文（2026-09-22） |
+| 打开历史会话恰好收到频道唤醒，页面只剩唤醒后消息、磁盘历史还在 | 四 · 打开期间流式事件抢先建立 transcript，历史快照被丢弃（2026-09-29） |
 | 给 store 加模块级订阅后，某些入口报 `Cannot read properties of undefined (reading 'subscribe')` | 四 · 同章节「renderer 模块图不许有环」（2026-09-21） |
 | 反复被 GC 卸载的已置顶会话，顶栏胶囊也一起消失了 | 四 · 同章节「写穿」：胶囊与左栏同源（tabs → 目录兜底） |
 
@@ -573,6 +574,14 @@ pi SDK 必须声明进 `packages/desktop/package.json` dependencies（electron-b
 - **renderer 模块图不许有环**：写穿用一个模块级订阅，立刻在「`sessions` 先进」的入口（三个 store 单测）报 `Cannot read properties of undefined (reading 'subscribe')`——环 `projects → sessions → ui-preferences → sidebar-groups → projects` 让 `projects` 的模块体在 `sessions` 未求值完时执行。环的成因只是 3 行纯函数 `toggleInList` 挂在 `sidebar-groups` 上（已拆成叶模块 `lib/toggle-in-list.ts`）。防线：`src/renderer/src/import-cycles.test.ts` 扫全图断言 0 环（本仓当时为 0，含 `import type`）。
 
 复现手法（可复用）：dev 实例 + CDP 直接驱 store 走真实入口（`.local/dev-logs/repro-session-catalog.mjs`）：`createSession()`（真实 promotion）→ `activateNewSessionDraft()` 切走 → `unloadSession(id)`（GC 真实入口）→ 断言 `inMemory=false` 但 `inCatalog=true` 且 `document.querySelector('[data-session-id=…]')` 仍在。**侧栏按组渲染，断言前要先展开该会话所在项目的组**（`setExpandedGroups([...groups, cwd])`），否则“行不在 DOM 里”是假阴性。
+
+### 打开期间流式事件抢先建立 transcript，历史快照被丢弃（2026-09-29，已修）
+
+症状：打开一条有大量历史的会话后，页面最上面是刚收到的频道唤醒，上滑到顶也没有更早消息；JSONL 历史仍完整。这与 compaction 裁模型上下文**无关**。实证：会话 `01a0d12b` 当前分支有 346 条 message entry、零 compaction；截图顶端的 09:41:17 消息在 JSONL 第 367 行，前面有 36 条 user、126 条 assistant。正式版日志显示 09:41:17.305 channel-watch 投递唤醒，09:41:17.335 后端才报 session opened；trace 记录此后响应事件。
+
+根因：`stores/sessions.ts` 的 `loadSessionBundleInner` 在历史 IPC 开始前以 `skipHistoryIfLive` 判断是否跳过，返回后又以 `liveNow` 判断是否丢弃历史。会话打开时频道扩展可能先唤醒 agent，事件桥建立了该 session 的 live transcript；于是历史即便读到了，也被 `if (history && !liveNow)` 丢弃。之后 live 事件只追加本次打开以来的新消息，结束时没有历史补拉；`switchSession` 只在 transcript **不存在**时懒加载，切回来也不会自愈。trace 不记录 `getSessionMessages` IPC，无法单独从 trace 断言哪一次守卫命中，但事件时序、截图起点与代码路径吻合。已知恢复手段：会话空闲后关闭并重新打开（或退出应用重进），让首次历史加载在无 live 竞态时完成；**不要删/改会话 JSONL**。
+
+修复（分支 `fix/session-history-hydration-barrier`）：`channel-watch` 恢复订阅时不立即启 watcher/离线对账，而是异步等 renderer 首份完整历史回放的 `session:historyReady` ACK（不能在 SDK `session_start` 中 await ACK，会与 `openSession` 死锁）；等待中 cursor 不推进，15s 无 renderer 兜底放行、关闭作废；SDK `dispose()` 不发送 `session_shutdown`，backend 须显式停 watcher（只用 SDK 钩子会漏）。其他来源仍可能抢跑：renderer `stores/session-history.ts` 明确区分「有 live entry」与「历史已就绪」，agent_settled 后重新读最新分支（旧快照不可复用），openingEpoch 防止关闭重开被旧结果覆盖；切回待补会话也会重试。覆盖频道 ACK 前/后/关闭、live 抢跑/IPC 途中抢跑/关后同 ID 重开。频道订阅的后台会话并不依赖用户**正在查看**，只等初始化完成。
 
 ### UI 历史不能读取被压缩的模型上下文（2026-09-22）
 

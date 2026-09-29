@@ -4,6 +4,7 @@ import { getPi } from "../api";
 import { useDraftStore } from "../stores/drafts";
 import { EventConflator } from "../stores/event-conflator";
 import { useProjectsStore } from "../stores/projects";
+import { retrySessionHistory } from "../stores/session-history";
 import { useSessionsStore } from "../stores/sessions";
 import { pushExtensionToast } from "../stores/toasts";
 import { useTranscriptStore } from "../stores/transcript";
@@ -28,6 +29,7 @@ export function useSessionEventBridge({
 					// 正被查看（= 当前活跃 tab）的会话完成时不打未读标记
 					isActiveViewing: useSessionsStore.getState().activeSessionId === sessionId,
 				});
+				if (event.type === "agent_settled") void retrySessionHistory(sessionId);
 			},
 		});
 		const offEvent = pi.onEvent(({ sessionId, event }: { sessionId: string; event: SessionEvent }) => {

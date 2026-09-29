@@ -5,6 +5,15 @@ import { getPi } from "../api";
 import { errText } from "../lib/error-text";
 import { clampThinkingLevel } from "../lib/thinking";
 import { COMPOSER_FOCUS_EVENT, useDraftStore } from "./drafts";
+import {
+	clearSessionHistory,
+	deferSessionHistory,
+	finishSessionHistory,
+	hasPendingSessionHistory,
+	historyOpenEpoch,
+	isHistoryReady,
+	retrySessionHistory,
+} from "./session-history";
 import { useSessionWorkspaceStore } from "./session-workspace";
 import { pushToast } from "./toasts";
 import { useTranscriptStore } from "./transcript";
@@ -151,9 +160,24 @@ const bundleInFlight = new Map<string, Promise<void>>();
 function loadSessionBundle(sessionId: string, opts?: { skipHistoryIfLive?: boolean }): Promise<void> {
 	const existing = bundleInFlight.get(sessionId);
 	if (existing) return existing;
-	const promise = loadSessionBundleInner(sessionId, opts).finally(() => {
-		if (bundleInFlight.get(sessionId) === promise) bundleInFlight.delete(sessionId);
-	});
+	const openingEpoch = historyOpenEpoch(sessionId);
+	const promise = loadSessionBundleInner(sessionId, opts)
+		.catch((error: unknown) => {
+			// 历史 IPC 失败也不能把「有一条实时消息」当作历史完成。保留可重试状态。
+			if (
+				historyOpenEpoch(sessionId) === openingEpoch &&
+				!isHistoryReady(sessionId) &&
+				useSessionsStore.getState().sessions.some((s) => s.sessionId === sessionId)
+			) {
+				deferSessionHistory(sessionId, () =>
+					useSessionsStore.getState().sessions.some((s) => s.sessionId === sessionId),
+				);
+			}
+			throw error;
+		})
+		.finally(() => {
+			if (bundleInFlight.get(sessionId) === promise) bundleInFlight.delete(sessionId);
+		});
 	bundleInFlight.set(sessionId, promise);
 	return promise;
 }
@@ -166,6 +190,8 @@ async function loadSessionBundleInner(
 	const skipHistory =
 		opts?.skipHistoryIfLive === true &&
 		useTranscriptStore.getState().bySession[sessionId]?.agentActive === true;
+	const transcriptBefore = useTranscriptStore.getState().bySession[sessionId];
+	const openingEpoch = historyOpenEpoch(sessionId);
 	const [history, followUpQueue, todos, permissionMode] = await Promise.all([
 		skipHistory ? Promise.resolve(null) : getPi().getSessionMessages({ sessionId }),
 		getPi().getFollowUpMessages({ sessionId }),
@@ -174,12 +200,29 @@ async function loadSessionBundleInner(
 	]);
 	// TOCTOU 复核：await 期间会话转为 live（如恰好有 prompt 竞态）时丢弃迟到历史，
 	// 防旧快照覆盖刚建立的流式态（queue/todo/permissionMode 是幂等快照，照常应用）
-	const liveNow = useTranscriptStore.getState().bySession[sessionId]?.agentActive === true;
+	const transcriptNow = useTranscriptStore.getState().bySession[sessionId];
+	const liveNow = transcriptNow?.agentActive === true;
+	// 不能只看 liveNow：IPC 期间恰好跑完的一轮可能已改写 transcript，旧快照仍过期。
+	// 关闭后的迟到 bundle 也绝不能重建该 session 的 UI 条目。
+	if (
+		historyOpenEpoch(sessionId) !== openingEpoch ||
+		!useSessionsStore.getState().sessions.some((s) => s.sessionId === sessionId)
+	)
+		return;
 	const t = useTranscriptStore.getState();
-	if (history && !liveNow) t.loadHistory(sessionId, messagesToUIMessages(history));
+	const historyNeedsRetry = !history || liveNow || transcriptBefore !== transcriptNow;
+	if (history && !historyNeedsRetry) {
+		t.loadHistory(sessionId, messagesToUIMessages(history));
+		finishSessionHistory(sessionId);
+	}
 	t.setFollowUpQueue(sessionId, followUpQueue);
 	t.loadTodos(sessionId, todos);
 	applyBackendPermissionMode(sessionId, permissionMode);
+	if (historyNeedsRetry) {
+		deferSessionHistory(sessionId, () =>
+			useSessionsStore.getState().sessions.some((s) => s.sessionId === sessionId),
+		);
+	}
 	// D7：本机记住过的档位盖过后端默认值（后端 mode 不落盘，重启/卸载重开后恒为 default）。
 	// 这里 await 而不是 fire-and-forget：保证「打开完就是正确档位」，验收才能确定性断言。
 	const remembered = useUiPreferencesStore.getState().sessionPermissionModes[sessionId];
@@ -442,6 +485,8 @@ async function promoteDraft(draft: NewSessionDraftConfig): Promise<string | null
 			};
 		});
 		useTranscriptStore.getState().resetSession(meta.sessionId);
+		// 全新会话的历史底座天然为空；在首次用户消息前即确认就绪。
+		finishSessionHistory(meta.sessionId);
 		if (isLatestActivation(token)) rememberCwd(targetCwd);
 		// draft 上选过的权限档位（入口快照）：后端新会话一律 default 起步，这里补上
 		// （失败只 toast，不回滚转正）
@@ -645,7 +690,9 @@ export const useSessionsStore = create<SessionsStore>((set, get) => ({
 		});
 		// 懒加载兜底（D4）：目标会话无 transcript 数据时补拉四件套（从历史打开、
 		// 事件桥断连期间的切换等都经此路径自愈；已有数据零成本短路）
-		if (useTranscriptStore.getState().bySession[sessionId] === undefined) {
+		if (!isHistoryReady(sessionId) && hasPendingSessionHistory(sessionId)) {
+			void retrySessionHistory(sessionId);
+		} else if (useTranscriptStore.getState().bySession[sessionId] === undefined) {
 			void loadSessionBundle(sessionId).catch((error) => {
 				console.error("切换会话时补拉数据失败", error);
 				pushToast("warning", "toast.sessionOpenFailed", errText(error));
@@ -684,6 +731,10 @@ export const useSessionsStore = create<SessionsStore>((set, get) => ({
 			pushToast("warning", "toast.closeFailed", errText(error));
 			return { closed: false };
 		}
+		clearSessionHistory(sessionId);
+		const closedFile = get().sessions.find((s) => s.sessionId === sessionId)?.sessionFile;
+		if (closedFile) openInFlight.delete(closedFile.trim());
+		bundleInFlight.delete(sessionId); // 旧实例的迟到请求已由 openingEpoch 失效，新实例可独立装载
 		useTranscriptStore.getState().resetSession(sessionId);
 		set((state) => {
 			const closing = state.sessions.find((s) => s.sessionId === sessionId);

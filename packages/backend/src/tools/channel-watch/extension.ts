@@ -46,6 +46,12 @@ export interface ChannelWatchOptions {
 	now?: () => number;
 	/** 唤醒发送（测试注入；缺省 pi.sendUserMessage） */
 	sendWake?: (text: string) => void;
+	/** 恢复订阅的 watcher/离线对账须等首次 UI 历史回放；不在 SDK session_start 中 await。 */
+	waitForHistoryReady?: (sessionId: string) => Promise<boolean>;
+	/** backend dispose() 不发 session_shutdown；绑定会话级清理以停 watcher、作废在途补投。 */
+	onSessionCleanup?: (cleanup: () => void) => void;
+	/** 丢弃与当前 registry entry 不匹配的启动续体（含同 ID 构造冲突）。 */
+	isSessionAlive?: (sessionId: string) => boolean;
 	/** notify（测试注入；缺省 lastCtx.ui.notify） */
 	notify?: (text: string) => void;
 	/**
@@ -101,6 +107,7 @@ export function makeChannelWatchExtension(options: ChannelWatchOptions): InlineE
 			/** watcher 世代：stop/shutdown 时 +1，用于作废「启动中」的那一轮（不挂孤儿 watcher） */
 			let watcherEpoch = 0;
 			let watcherPromise: Promise<void> | null = null;
+			let startupEpoch = 0;
 
 			const notify = (text: string): void => {
 				try {
@@ -176,7 +183,12 @@ export function makeChannelWatchExtension(options: ChannelWatchOptions): InlineE
 			 * **所有跨 await 的续体都要复查它**：await 期间可能发生 shutdown、退订、
 			 * 甚至 watcher 重建，若不复查就会出现幽灵投递/幽灵 cursor/孤儿 watcher（REVIEW 2.1 阻塞 2）。
 			 */
-			const isLive = (): boolean => active && trusted && subscriptions.size > 0;
+			const isLive = (): boolean =>
+				active &&
+				trusted &&
+				subscriptions.size > 0 &&
+				(!options.isSessionAlive ||
+					(lastCtx !== null && options.isSessionAlive(lastCtx.sessionManager.getSessionId())));
 
 			/** abs 路径若正是某个已订阅频道的主消息文件，返回该 topic（其余一律 null） */
 			const subscribedTopicOfPath = (abs: string): string | null => {
@@ -487,11 +499,22 @@ export function makeChannelWatchExtension(options: ChannelWatchOptions): InlineE
 				}
 			};
 
+			const cleanup = (): void => {
+				startupEpoch++;
+				stopWatcher();
+				guard.reset();
+				active = false;
+				trusted = false;
+				reportSubscriptions();
+			};
+
 			// --- 生命周期 ---
 			pi.on("session_start", async (_event, ctx) => {
+				const epoch = ++startupEpoch;
 				// 先取 ctx：disabled/untrusted 分支也要能上报（空集）
 				lastCtx = ctx;
 				try {
+					options.onSessionCleanup?.(cleanup);
 					if (!enabled()) {
 						active = false;
 						trusted = false;
@@ -520,9 +543,6 @@ export function makeChannelWatchExtension(options: ChannelWatchOptions): InlineE
 							error: err instanceof Error ? err.message : String(err),
 						});
 					}
-					if (trusted && subscriptions.size > 0) {
-						await ensureWatcher();
-					}
 					bindTools();
 					log.info("channel-watch session_start", {
 						trusted,
@@ -531,10 +551,30 @@ export function makeChannelWatchExtension(options: ChannelWatchOptions): InlineE
 					});
 					// 恢复完成后再上报（含空集）：backend 据此把本会话标为「有频道订阅」
 					reportSubscriptions();
-					// watcher 就绪后逐 topic 对账（spec §6.4）：已知 cursor 不同 → 每 topic 补投一次；
-					// 旧载荷只建基线；会话离线期间的写入在这里被补上
+					// SDK bindExtensions 正在 await 本次 session_start：若这里等 renderer ACK，
+					// openSession 永远无法返回。异步等历史就绪后再启动 watcher + 对账；等待期间
+					// cursor 不推进，关闭/退订/重载后 epoch 与 isLive 双重守卫阻止幽灵投递。
 					if (trusted && subscriptions.size > 0) {
-						for (const topic of subscriptions) await reconcileTopic(topic);
+						const resume = async () => {
+							try {
+								if (options.waitForHistoryReady) {
+									const allowed = await options.waitForHistoryReady(ctx.sessionManager.getSessionId());
+									if (!allowed) return; // backend dispose() 不触发 session_shutdown
+								}
+								if (epoch !== startupEpoch || !isLive()) return;
+								await ensureWatcher();
+								if (epoch !== startupEpoch || !isLive()) return;
+								for (const topic of subscriptions) await reconcileTopic(topic);
+							} catch (err) {
+								log.warn("channel-watch 历史就绪后对账失败", {
+									error: err instanceof Error ? err.message : String(err),
+								});
+							}
+						};
+						// 无屏障的 CLI/隔离测试沿用原同步初始化；有屏障的桌面必须脱离
+						// session_start Promise，否则 openSession 与 renderer ACK 会互等。
+						if (options.waitForHistoryReady) void resume();
+						else await resume();
 					}
 				} catch (err) {
 					// init/恢复失败 → 降级为不激活（会话照常）
@@ -583,12 +623,7 @@ export function makeChannelWatchExtension(options: ChannelWatchOptions): InlineE
 
 			pi.on("session_shutdown", () => {
 				try {
-					stopWatcher();
-					guard.reset();
-					active = false;
-					trusted = false;
-					// 上报空集：会话已不驻留，订阅保护随之解除（backend 也有 dispose 兜底）
-					reportSubscriptions();
+					cleanup();
 				} catch (err) {
 					log.warn("channel-watch shutdown 清理失败", {
 						error: err instanceof Error ? err.message : String(err),

@@ -95,6 +95,8 @@ export const SESSION_CHANNELS = {
 	setThinkingLevel: ch("session:setThinkingLevel")<{ sessionId: string; level: string }, void>(),
 	/** 读取会话历史消息（打开历史会话时回放） */
 	getSessionMessages: ch("session:getMessages")<{ sessionId: string }, SessionMessage[]>(),
+	/** 首份完整历史已落到 renderer；解除启动期频道唤醒屏障 */
+	markSessionHistoryReady: ch("session:historyReady")<{ sessionId: string }, void>(),
 	/** 读取会话当前 todo 列表（无则空数组） */
 	getTodos: ch("session:getTodos")<{ sessionId: string }, TodoItem[]>(),
 	compact: ch("session:compact")<{ sessionId: string; customInstructions?: string }, void>(),

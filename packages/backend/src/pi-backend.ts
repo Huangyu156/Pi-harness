@@ -70,6 +70,7 @@ import { ProjectResourceLoader } from "./project/trust-loader";
 import { addAllowedPattern, addWorkspaceRoot } from "./project/workspace-store";
 import { slimBulkyEvent, slimMessageUpdate } from "./session/event-slim";
 import { ExtensionDialogHost } from "./session/extension-dialog-host";
+import { SessionHydrationGate } from "./session/hydration-gate";
 import {
 	blockImages,
 	blockText,
@@ -201,6 +202,9 @@ export class PiBackend {
 	/** 会话事件 trace（JSONL，离线可重放） */
 	private readonly traces = new SessionTraces();
 	private readonly streamGuard = new StreamGuard();
+	private readonly historyGate = new SessionHydrationGate();
+	/** SDK dispose 不触发 session_shutdown；按会话 modeRef 精确停掉其频道 watcher。 */
+	private readonly channelWatchCleanups = new WeakMap<PermissionModeRef, () => void>();
 	/** 每会话事件速率（60s 窗口；心跳/临终快照数据源） */
 	private readonly eventRates = new EventRateTracker();
 	private modelRuntime: ModelRuntime | undefined;
@@ -320,7 +324,16 @@ export class PiBackend {
 			makeChannelWatchExtension({
 				agentDir: getAgentDir(),
 				cwd,
-				onSubscriptionsChanged: (sessionId, topics) => this.reportChannelSubscriptions(sessionId, topics),
+				onSubscriptionsChanged: (sessionId, topics) => {
+					const current = this.registry.get(sessionId);
+					if (!current || current.modeRef === modeRef) this.reportChannelSubscriptions(sessionId, topics);
+				},
+				waitForHistoryReady: (sessionId) => this.historyGate.wait(sessionId),
+				isSessionAlive: (sessionId) =>
+					modeRef !== undefined && this.registry.get(sessionId)?.modeRef === modeRef,
+				onSessionCleanup: (cleanup) => {
+					if (modeRef) this.channelWatchCleanups.set(modeRef, cleanup);
+				},
 			}),
 		);
 		// todo-reminder 最后：compaction 后恢复注入的任务列表不被上游折叠
@@ -534,6 +547,8 @@ export class PiBackend {
 				readOnly: readOnly || undefined,
 			});
 		} catch (error) {
+			this.channelWatchCleanups.get(modeRef)?.();
+			this.channelWatchCleanups.delete(modeRef);
 			// registry 的最后防线（同 sessionId 已被别的 entry 占住，如并发/别名路径）：
 			// 刚构造的这份必须当场拆干净（订阅/gate/dialogs/session），不能只抛错把资源泄漏出去
 			unsubscribe();
@@ -623,7 +638,10 @@ export class PiBackend {
 	/** 真正的处置：dispose + registry/全局键控子系统清理（closeSession 与 deleteSession 共用） */
 	private async disposeSession(entry: RegisteredSession): Promise<void> {
 		const sessionId = entry.session.sessionId;
+		this.channelWatchCleanups.get(entry.modeRef)?.();
+		this.channelWatchCleanups.delete(entry.modeRef);
 		entry.session.dispose();
+		this.historyGate.cancel(sessionId);
 		// entry 级清理：unsubscribe + gate/dialogs dispose（pending 对话框按 sessionClosed 结算，
 		// 广播 resolved 让 renderer 撤卡；扩展 Promise 落取消值）
 		this.registry.delete(sessionId);
@@ -864,6 +882,11 @@ export class PiBackend {
 	async exportSession(sessionId: string, format: "html" | "jsonl"): Promise<string> {
 		const entry = this.requireSession(sessionId);
 		return format === "html" ? entry.session.exportToHtml() : entry.session.exportToJsonl();
+	}
+
+	/** renderer 已落下首份完整历史；放行启动期频道 watcher + 离线对账。 */
+	markSessionHistoryReady(sessionId: string): void {
+		if (this.registry.has(sessionId)) this.historyGate.ack(sessionId);
 	}
 
 	/** 读取会话树当前分支的完整历史（compaction 只裁模型上下文，不裁 UI 历史） */
@@ -1173,7 +1196,9 @@ export class PiBackend {
 	}
 
 	dispose(): void {
+		for (const entry of this.registry.list()) this.channelWatchCleanups.get(entry.modeRef)?.();
 		this.registry.disposeAll();
+		this.historyGate.dispose();
 		this.eventEmitter.clear();
 		this.permissionEmitter.clear();
 		this.permissionResolvedEmitter.clear();
