@@ -345,6 +345,8 @@ export function SessionTabBar() {
 			{/* 左栏开合（右栏 diff 图标的镜像）：开态底色区分；左栏收起后展开也靠它，设置入口就在左栏里 */}
 			<button
 				type="button"
+				// 可测试性只读属性（CDP 验收按它点左栏开合，避免按 aria-label 文案匹配；不影响视觉/交互）
+				data-sidebar-toggle=""
 				className={`no-drag shrink-0 rounded-lg p-1.5 transition-colors ${
 					sidebarCollapsed ? "text-ink-dim hover:bg-hover hover:text-ink" : "bg-hover text-ink"
 				}`}

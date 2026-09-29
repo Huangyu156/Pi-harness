@@ -256,7 +256,7 @@ pi SDK 必须声明进 `packages/desktop/package.json` dependencies（electron-b
 2. **对同一坐标的 `mouseMoved` 不会重算 hover**：截图后想恢复 hover，直接再发一次相同坐标无效 —— 必须**先挪开一点（如 −60px）再挪回来**。
 3. `mousePressed` 与 `mouseReleased` 之间**贴太紧偶发不合成 `click`**，验证点击行为时中间留 ~70ms 更稳。
 4. **合成 `mouseover` 会污染后续命中测试**：`dispatchEvent(new MouseEvent("mouseover"))` 派发的**合成**事件同样会把 `:hover` 链点亮，而且**不会自己消失** —— 后面用 `document.elementFromPoint()` 量「收起态覆盖层是否挡住正文」时，会误判成「挡住了」（实测：轨道项本来 24px 宽，却报 x=300 命中轨道）。做法：量命中区之前先对**所有**相关元素派发一次 `mouseout`（或等一次真实 `Input.dispatchMouseEvent` 把指针挪走），再读 `elementFromPoint`。
-5. **`mouseWheel` 的落点必须真的在目标容器上，且不能被刚弹出的浮层盖住**：右键菜单挂在指针处，紧接着朝“列表中心”派 wheel 很可能落在**菜单**上（菜单不可滚）→ 容器`scrollTop` 纹丝不动，看起来像“滚动了但菜单没关”的假失败。做法：先算出浮层矩形，再在目标容器里挑一个不被遮挡的点，并**同时断言容器 `scrollTop` 真的变了**（否则这条断言本来就不能判定）。实例：`scripts/check-sidebar-group-scroll.mjs` 的“滚动后菜单关闭”那一步。
+5. **`mouseWheel` 的落点必须真的在目标容器上，且不能被刚弹出的浮层盖住**：右键菜单挂在指针处，紧接着朝“列表中心”派 wheel 很可能落在**菜单**上（菜单不可滚）→ 容器`scrollTop` 纹丝不动，看起来像“滚动了但菜单没关”的假失败。做法：先算出浮层矩形，再在目标容器里挑一个不被遮挡的点，并**同时断言容器 `scrollTop` 真的变了**（否则这条断言本来就不能判定）。实例：`scripts/check-sidebar-unified-scroll.mjs`（旧 `check-sidebar-group-scroll.mjs` 2026-09-29 随统一滚动改造替换）的“滚动后菜单关闭”那一步。
 
 ### 嵌套滚动的归属验证 + `overscroll-behavior: contain` 会吞掉滚轮（2026-09-21，左栏分组列表限高）
 
@@ -273,6 +273,8 @@ pi SDK 必须声明进 `packages/desktop/package.json` dependencies（electron-b
 
 做法：**`contain` 只在“确实会溢出”时才挂，且与该状态标记（如 `data-scrollable`）用同一个布尔值驱动**，别写两套判据（否则探针与真实行为会分叉）。溢出时需要 contain（边界不穿透），不溢出时必须让它为 `auto`（滚轮交给外层）。实测落地见 `components/sidebar/SidebarSessionList.tsx`。
 
+> **后续（2026-09-29，spec `sidebar-unified-scroll`）**：组内限高与嵌套滚动**整体删掉了**（用户反馈「滚到自己组边界还要把指针挪到项目标题上才能继续」），现在左栏只有**一个**外层滚动容器，分组改为「默认 6 条 + 末尾『显示更多』每次 +16」（`lib/sidebar-visible-count.ts`，次数只在内存）。于是上面那套 contain 判据连同 `SidebarSessionList` 的限高/淡出/自身滚动一起消失——本条留作**通用知识**：以后任何时候想给「可能不溢出」的容器挂 `overscroll-behavior: contain`，先想清楚滚轮被吞的代价。新的验收脚本 `scripts/check-sidebar-unified-scroll.mjs` 会直接断言「主体内 0 个自己还能滚的元素」。
+
 **验证滚动归属的三条纪律**（都真踩过）：
 
 1. **不能拿「直接赋 `scrollTop`」冒充滚动**：它绕过滚动链，结论必然假绿。真实 wheel 用 `Input.dispatchMouseEvent({ type: "mouseWheel", deltaY })`（先 `mouseMoved` 到目标上——命中区决定滚动链）。赋 `scrollTop` 只用来把容器**预置**到中部/底部。
@@ -286,6 +288,10 @@ pi SDK 必须声明进 `packages/desktop/package.json` dependencies（electron-b
 - **`Browser.setWindowBounds` / `Browser.getWindowForTarget` 在 Electron 下未实现**（method not found）。想真改窗口尺寸就用页面里的 `window.resizeTo(w, h)` —— Electron 支持，`window.innerWidth` 会真的变（本任务用它验了右栏 push ↔ 浮层的 1100 / 1000 / 900 三档）。
 - **CDP 注入的鼠标事件不会驱动 `-webkit-app-region: drag` 的窗口拖拽**：程序化拖不动窗口（连改造前就存在的顶栏拖拽区也拖不动），所以「无边框窗口的自定义拖拽带还能不能拖」**只能人工确认**；脚本只能验到 `getComputedStyle(el).webkitAppRegion === "drag"` 且元素尺寸非零。
 - `Input.dispatchMouseEvent` 坐标是**视口 CSS px**；`Page.captureScreenshot` 的 `clip` 也是 CSS px，输出像素 = clip × DPR。
+- **CDP 键盘事件要触发原生 `<button>` 激活，必须 `type: "keyDown"` 且带 `text`**（2026-09-29 实测，验「行末『显示更多』按钮能用 Enter 触发」时踩到）：
+  Enter → `{ type: "keyDown", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13, text: "\r", unmodifiedText: "\r" }` + `keyUp`；
+  只发 `rawKeyDown` 会**照常派发 keydown 事件落到监听器上、但不产生 click**（页面里能收到 `keydown:Enter`，行为却像没按），看着像「按钮坏了」。
+  Space 同样要给 `text: " "`。验证键盘可达性时别忘了分两步断言：**能聚焦**（`el.focus()` 后 `document.activeElement === el`，折叠态 `inert` 下应为 false）与**能触发**。
 
 ### Tailwind 4 的 `rotate-*` 走 CSS `rotate` 属性，不是 `transform`（2026-09-19）
 

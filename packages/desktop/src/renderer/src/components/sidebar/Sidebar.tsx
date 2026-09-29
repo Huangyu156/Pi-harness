@@ -8,12 +8,14 @@ import { ProjectSection } from "./ProjectSection";
 import { SidebarFooter } from "./SidebarFooter";
 import { SidebarGroup } from "./SidebarGroup";
 import { SidebarHeader } from "./SidebarHeader";
-import { useExpandedGroups } from "./useExpandedGroups";
+import { useSidebarBatching } from "./useSidebarBatching";
 
 /**
  * 左侧栏容器（Codex 式常驻导航）：只做「取 store 数据 → 调纯函数派生 → 分发 props」，
  * 不碰持久化、不碰 IPC。宽度 240 ↔ 0 的过渡在 globals.css 的 .sidebar 段（push 式，内层固定 240
  * 所以过渡期间内容只被推走、不被横向挤压）。收起时整栏 `inert`：不接指针也不进 Tab 序。
+ * 「每组 6 条 + 显示更多」与搜索临时展开的**内存态**在 `useSidebarBatching`（不持久化、不新增 IPC），
+ * 本组件只负责把它和派生结果一起分发下去。宽度与开合动画不受分批影响。
  */
 export function Sidebar() {
 	const t = useT();
@@ -32,7 +34,6 @@ export function Sidebar() {
 	const memorySessions = useSessionsStore((s) => s.sessions);
 	// 默认展开组用「当前目录」：真实会话 = 它的项目；新会话页 = draft 的目录（store.cwd 两处都已镜像）
 	const activeCwd = useSessionsStore((s) => s.cwd);
-	const { toggleGroup } = useExpandedGroups();
 
 	// 装配全在纯函数层（含只读子会话过滤 + 项目表同源），Sidebar 只负责取数与分发
 	const data = useMemo(
@@ -61,9 +62,9 @@ export function Sidebar() {
 		],
 	);
 
-	// 首次开合的起点由派生层给（当前会话所在组 + 项目小标），组件不自己再算一遍
-	const defaults = data.defaultExpandedKeys;
-	const onToggleGroup = (key: string) => toggleGroup(key, defaults);
+	// 分批显示（每组 6 条 + 显示更多）与搜索临时展开：纯内存态，只在渲染时叠加到派生结果上。
+	// 首次开合的起点由派生层给（当前会话所在组），组件不自己再算一遍。
+	const batching = useSidebarBatching({ search, defaults: data.defaultExpandedKeys });
 	const empty = data.daily === null && data.projects.length === 0;
 
 	return (
@@ -80,14 +81,20 @@ export function Sidebar() {
 					className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto px-2 pt-0.5 pb-2.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
 				>
 					{data.daily && (
-						<SidebarGroup group={data.daily} activeSessionId={activeSessionId} onToggle={onToggleGroup} />
+						<SidebarGroup group={data.daily} activeSessionId={activeSessionId} batching={batching} />
 					)}
 					<ProjectSection
 						projects={data.projects}
 						activeSessionId={activeSessionId}
-						onToggleGroup={onToggleGroup}
+						batching={batching}
 						onTogglePin={toggleProjectPin}
-						onRemoveProject={(cwd) => void deleteProject(cwd)}
+						onRemoveProject={(cwd) => {
+							// 计数等删除真的成功再清：失败了就留着，别让「已显示多少条」比真实数据跑在前面
+							void deleteProject(cwd).then(
+								() => batching.forget(cwd),
+								(error: unknown) => console.error("移除项目失败", error),
+							);
+						}}
 					/>
 					{empty && (
 						<p className="px-1.5 py-6 text-center text-[12px] text-ink-faint">

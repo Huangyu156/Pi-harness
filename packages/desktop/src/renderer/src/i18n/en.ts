@@ -278,6 +278,8 @@ export const en: Messages = {
 			"This removes the project from Percho; it has no sessions, and the project files on your computer stay untouched.",
 		searchEmpty: "No matching sessions",
 		noSessions: "No sessions",
+		/** Per-group "show more" button at the end of the list (16 more rows each click) */
+		showMore: "Show more",
 	},
 	projects: {
 		daily: "Daily",

@@ -274,6 +274,8 @@ export const zh = {
 		removeProjectDescEmpty: "该项目下暂无会话；你电脑上的项目文件不受影响。",
 		searchEmpty: "没有匹配的会话",
 		noSessions: "暂无会话",
+		/** 每组末尾「显示更多」按钮（每次多显示 16 条） */
+		showMore: "显示更多",
 	},
 	projects: {
 		daily: "日常",
