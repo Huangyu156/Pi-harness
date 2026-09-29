@@ -23,6 +23,7 @@
 | 新增 UI 文案只显示一种语言 | 四 · i18n 双字典 |
 | 凭证泄漏风险、密钥误提交 | 五 · 绝不打印/提交 API key |
 | LAN 页连接僵死不重连、状态「重连中/已连接」反复跳 | 二 · SSE 心跳必须是命名事件帧 |
+| 重开会话后某条 UI 痕迹没了（压缩分割线消失） | 二 · compaction entry 能回放，且它不存原因/压缩后估值（2026-09-29） |
 | LAN 对话页正文重复出现在末尾、run 结束又恢复正常 | 二 · 流式增量帧不可重放（healing 兜底差量） |
 | 流式输出时整个 Markdown 区域随 token 节奏闪烁、尾部文字半透明往上爬 | 四 · markstream fade 的临时合成层（已修：组件 API 关闭 fade） |
 | 代码块顶部两行无法拖选、标点偶发橙色框 | 四 · 悬浮 header 命中层 + Monaco Unicode 高亮 |
@@ -159,6 +160,16 @@ LAN 页重连/中途进入时，快照种子经 `messagesToUIMessages` 重建—
 修复（2026-09-17，改 **skill 协议**而非代码）：跨会话协作改成**阶段门**——阶段边界 `git commit` + IMPL-NOTES + `channel_post`，然后**turn 必须结束**（不再调工具）；对方回话时实施已停手（turn 结束 → followUp 立即投递），工作区也静止（review 的回归结论可信）。见 `packages/desktop/resources/skills/channel-pickup/SKILL.md`「阶段门」节。
 
 **教训**：想让另一个会话及时收到消息，先看它的 turn 什么时候结束——`followUp` 的送达时机由**对方**的 turn 边界决定，不由发送方决定；要「立即送达」只有 `steer`（GUI 里用户自己发的消息目前也走 followUp 排队，`pi-backend.ts:572`）。所以「让双方停在同一节奏上」比引入锁/快照沙箱便宜得多。
+
+### compaction entry 能回放，且它不存原因/压缩后估值（2026-09-29）
+
+**通用教训**：只活在实时事件里的 UI 痕迹（压缩分割线、输入框上方的临时提醒）重开会话必然消失——回放只认会话树 entry。压缩分割线就是这个坑：`compaction_start/end` 事件产的那条线重开就没了，而磁盘上其实**一直有** `type:"compaction"` 的 entry 被回放函数 filter 掉了（`toBranchSessionMessages` 原来只收 `type === "message"`）。
+
+它的**位置天然正确**：`appendCompaction` 追加在当时 leaf 之后，所以按分支顺序把它插回消息流，分割线就落在"当时压缩的那一处"（实测 1833 条 entry 的分支上两条分别落在 145/1121、484/1121，前后消息 timestamp 单调）。
+
+**形状（SDK 0.84.3 实测 20 条）**：`{ type, id, parentId, timestamp(ISO 串), summary, firstKeptEntryId, tokensBefore, details:{readFiles,modifiedFiles}, usage, fromHook }`。**没有 `reason`**（手动/阈值/溢出都不记），**也没有压缩后估值**（`estimatedTokensAfter` 只在事件里）——所以回放的分割线只能显示「已压缩上下文 · 压缩前 156.4k」+ 可展开摘要（摘要是同一条字符串，展开内容与实时一致）。想与实时逐字一致（带原因 + `x → y`），只能自己在 `compaction_end` 时补写一条 `custom` entry（`appendCustomEntry` 不进 LLM 上下文，撤回标记 `message-recalled` 同款）。
+
+**加 role 的连带坑**：`SessionMessage` 新增 role 时，LAN 的 `sanitizeSessionMessage` 会把未知 role 落进最后那个 subagent 分支（`message.runs.map` 直接抛错）——新 role 必须在里面显式加分支。
 
 ### 长生命周期订阅不能挂在「可被自动 GC 的会话实例」上（2026-09-20，channel-watch retention + 持久补投）
 

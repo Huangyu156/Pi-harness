@@ -22,6 +22,27 @@ function seeded() {
 }
 
 describe("LAN projector（D6：reducer 态 + 派生视图）", () => {
+	it("seeds the replay transcript including compaction dividers (重开也能看到压过)", () => {
+		const projection = seedProjection(
+			"session-1",
+			"LAN test",
+			"/work",
+			undefined,
+			[],
+			null,
+			[
+				{ role: "user", text: "压缩前", thinking: "", tools: [], images: [], timestamp: 1 },
+				{ role: "compaction", timestamp: 2, summary: "被压掉的上下文", tokensBefore: 330_930 },
+			],
+			null,
+		);
+		expect(projection.state.messages.map((m) => m.kind)).toEqual(["user", "system"]);
+		expect(projection.state.messages[1]).toMatchObject({
+			kind: "system",
+			compact: { status: "done", summary: "被压掉的上下文", tokensBefore: 330_930 },
+		});
+	});
+
 	it("projects agent, text, todo tool, and completion events", () => {
 		vi.spyOn(Date, "now").mockReturnValue(1000);
 		let projection = seeded();

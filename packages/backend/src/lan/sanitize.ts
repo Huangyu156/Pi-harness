@@ -91,6 +91,10 @@ export function sanitizeSessionMessage(message: SessionMessage): SessionMessage 
 		const { sourceText: _st, ...rest } = message;
 		return { ...rest, images: placeholderImages(message.images) };
 	}
+	if (message.role === "compaction") {
+		// 压缩分割线回放：摘要本是模型产出文本（实时事件也原样转发），无本地路径/图片可剥
+		return message;
+	}
 	if (message.role === "image") {
 		// show_image 历史：占位保留（客户端显示图片占位），本地路径剥除
 		return { ...message, images: placeholderImages(message.images), paths: [] };

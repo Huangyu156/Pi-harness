@@ -82,6 +82,16 @@ describe("sanitizeSessionMessage", () => {
 		expect(run && "sessionFile" in run).toBe(false);
 		expect(run && "artifactsDir" in run).toBe(false);
 	});
+
+	it("keeps compaction divider as-is (no local paths to strip)", () => {
+		const message = {
+			role: "compaction",
+			timestamp: 1,
+			summary: "被压掉的上下文",
+			tokensBefore: 330_930,
+		} satisfies SessionMessage;
+		expect(sanitizeSessionMessage(message)).toEqual(message);
+	});
 });
 
 describe("sanitizeSessionEvent", () => {

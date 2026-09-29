@@ -108,7 +108,6 @@ export const zh = {
 			extension: "扩展",
 		},
 		feedback: {
-			compacted: "已开始压缩上下文",
 			renamed: "会话已改名：{name}",
 			noName: "用法：/name <名字>",
 			exported: "已导出：{path}",
@@ -133,6 +132,8 @@ export const zh = {
 		done: "已压缩上下文",
 		cancelled: "已取消压缩",
 		failed: "压缩失败：{error}",
+		/** 历史回放专用：磁盘 compaction entry 不存压缩后估值，只能给「压缩前 x」 */
+		tokensBefore: "压缩前 {tokens}",
 		summary: "摘要",
 		reason: {
 			manual: "手动",

@@ -110,7 +110,6 @@ export const en: Messages = {
 			extension: "Extensions",
 		},
 		feedback: {
-			compacted: "Context compaction started",
 			renamed: "Session renamed: {name}",
 			noName: "Usage: /name <name>",
 			exported: "Exported: {path}",
@@ -135,6 +134,8 @@ export const en: Messages = {
 		done: "Context compacted",
 		cancelled: "Compaction cancelled",
 		failed: "Compaction failed: {error}",
+		/** Replay-only: the persisted compaction entry has no post-compaction estimate */
+		tokensBefore: "before {tokens}",
 		summary: "Summary",
 		reason: {
 			manual: "manual",

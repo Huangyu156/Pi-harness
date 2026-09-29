@@ -1429,6 +1429,27 @@ describe("messagesToUIMessages 历史回放", () => {
 		expect(assistant.tools[0]?.diff).toBe("--- a\n+++ b\n");
 		expect(assistant.tools[1]?.diff).toBeUndefined();
 	});
+
+	it("压缩标记回放为分割线（摘要 + 压缩前 token，无 reason → 不显原因）", () => {
+		const ui = messagesToUIMessages([
+			{ role: "user", text: "压缩前", thinking: "", tools: [], images: [], timestamp: 1 },
+			{ role: "compaction", timestamp: 2, summary: "被压掉的上下文", tokensBefore: 330_930 },
+			{ role: "user", text: "压缩后", thinking: "", tools: [], images: [], timestamp: 3 },
+		]);
+		expect(ui.map((m) => m.kind)).toEqual(["user", "system", "user"]);
+		expect(ui[1]).toEqual({
+			kind: "system",
+			id: "h1",
+			text: "",
+			timestamp: 2,
+			compact: { status: "done", summary: "被压掉的上下文", tokensBefore: 330_930 },
+		});
+	});
+
+	it("压缩标记字段缺省时仍产分割线（无摘要、无 token 也不崩）", () => {
+		const ui = messagesToUIMessages([{ role: "compaction", timestamp: 7 }]);
+		expect(ui).toEqual([{ kind: "system", id: "h0", text: "", timestamp: 7, compact: { status: "done" } }]);
+	});
 });
 
 describe("transcript store unseenCompletion", () => {

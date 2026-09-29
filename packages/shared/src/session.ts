@@ -177,12 +177,23 @@ export interface SessionSubagentMessage {
 	timestamp: number;
 }
 
+/** 历史压缩标记（compaction entry 回放）：实时分割线走 compaction_start/end 事件，重开会话只能从会话树回放 */
+export interface SessionCompactionMessage {
+	role: "compaction";
+	timestamp: number;
+	/** 摘要正文（与实时分割线展开的摘要同源） */
+	summary?: string;
+	/** 压缩前上下文 token 数（磁盘 entry 只存这个；压缩后估值不落盘） */
+	tokensBefore?: number;
+}
+
 /** 历史会话消息（打开历史会话时回放用；不依赖 pi 内部类型） */
 export type SessionMessage =
 	| SessionUserMessage
 	| SessionAssistantMessage
 	| SessionImageMessage
-	| SessionSubagentMessage;
+	| SessionSubagentMessage
+	| SessionCompactionMessage;
 
 export interface AvailableModel {
 	provider: string;
