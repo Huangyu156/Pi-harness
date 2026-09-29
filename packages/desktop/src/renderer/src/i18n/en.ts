@@ -31,7 +31,6 @@ export const en: Messages = {
 		pin: "Pin",
 		unpin: "Unpin",
 		sessionList: "Session list",
-		workspaceHint: "Sessions you open show up here (× only removes them from the workspace)",
 	},
 	rail: {
 		ariaLabel:

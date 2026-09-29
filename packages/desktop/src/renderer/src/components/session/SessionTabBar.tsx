@@ -340,7 +340,7 @@ export function SessionTabBar() {
 
 	return (
 		<div
-			className={`${dragging ? "" : "drag-region"} flex h-12 shrink-0 items-center gap-1 border-b border-border bg-canvas ${chromePadding}`}
+			className={`${dragging ? "" : "drag-region"} flex h-12 shrink-0 items-center gap-1 bg-canvas ${chromePadding}`}
 		>
 			{/* 左栏开合（右栏 diff 图标的镜像）：开态底色区分；左栏收起后展开也靠它，设置入口就在左栏里 */}
 			<button
@@ -363,13 +363,8 @@ export function SessionTabBar() {
 				}}
 				className="flex min-w-0 flex-1 items-center gap-1 overflow-x-scroll [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
 			>
-				{/* 空态提示：工作区不是「全量会话表」（左栏才是），不说清楚用户会以为顶栏坏了；
-				   开关关掉时不提示（那是用户的明确选择，不是“空”） */}
-				{barSessionsVisible && barSessions.length === 0 && (
-					<span className="min-w-0 truncate pl-1 text-[12px] text-ink-faint">
-						{t("tabbar.workspaceHint")}
-					</span>
-				)}
+				{/* 空态不提示文字：顶栏空着就是空着（原来那句「打开过的会话会显示在这里」是想解释
+				    工作区不是全量会话表，但顶栏本身就是个容器，解释反而多一行噪声） */}
 				<DndContext
 					sensors={sensors}
 					collisionDetection={closestCenter}

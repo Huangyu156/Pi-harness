@@ -122,7 +122,7 @@ export function ModelPicker() {
 		<div ref={ref} className="relative">
 			<button
 				type="button"
-				className="flex max-w-[208px] items-center gap-1 rounded-lg px-2 py-1 text-xs text-ink-dim transition-colors hover:bg-hover hover:text-ink"
+				className="flex max-w-[208px] items-center gap-1 rounded-full px-2.5 py-1 text-xs text-ink-dim transition-colors hover:bg-hover hover:text-ink"
 				onClick={() => setOpen((v) => !v)}
 			>
 				{/* 模型名先截断，档位后缀永不截断（否则长模型名下看不到当前档位） */}
@@ -136,7 +136,10 @@ export function ModelPicker() {
 			    配合搜索框 autoFocus 触发 Chromium 对 #root 的程序性横向滚动（overflow:hidden 拦不住）：
 			    窄窗口下实测根横滚约 35.5px，顶栏最左按钮 left 从 80 被挤到 72（1100px）/44.5（窄窗口）。 */}
 			{open && (
-				<div className="absolute right-0 bottom-full z-30 mb-1 w-72 rounded-xl bg-surface p-1 shadow-pop">
+				<div
+					data-composer-overlay=""
+					className="absolute right-0 bottom-full z-30 mb-1 w-72 rounded-xl bg-surface p-1 shadow-pop"
+				>
 					<div className="flex items-center gap-1.5 rounded-lg px-2 py-1.5 pr-3">
 						<SearchIcon size={13} className="shrink-0 text-ink-faint" />
 						<input

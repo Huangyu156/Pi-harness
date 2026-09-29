@@ -1,6 +1,7 @@
-import { useMemo } from "react";
+import { type CSSProperties, useMemo, useRef } from "react";
 import { useT } from "../../i18n";
 import { deriveSidebarNavigation } from "../../lib/sidebar-groups";
+import { useEdgeFade } from "../../lib/use-edge-fade";
 import { useProjectsStore } from "../../stores/projects";
 import { useSessionsStore } from "../../stores/sessions";
 import { useUiPreferencesStore } from "../../stores/ui-preferences";
@@ -67,6 +68,10 @@ export function Sidebar() {
 	const batching = useSidebarBatching({ search, defaults: data.defaultExpandedKeys });
 	const empty = data.daily === null && data.projects.length === 0;
 
+	// 左栏唯一滚动容器的边界淡出（底部下沿淡出，原来这里是一条 1px 实线）
+	const sidebarScrollRef = useRef<HTMLDivElement>(null);
+	useEdgeFade(sidebarScrollRef);
+
 	return (
 		<aside
 			className={`sidebar ${collapsed ? "is-collapsed" : ""}`}
@@ -77,8 +82,10 @@ export function Sidebar() {
 				<SidebarHeader />
 				{/* 左栏唯一的外层滚动容器：验收脚本用 `data-sidebar-scroll-root` 定位它（纯属性，无视觉影响） */}
 				<div
+					ref={sidebarScrollRef}
 					data-sidebar-scroll-root=""
-					className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto px-2 pt-0.5 pb-2.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+					style={{ "--edge-fade-size": "16px" } as CSSProperties}
+					className="edge-fade min-h-0 flex-1 overflow-x-hidden overflow-y-auto px-2 pt-0.5 pb-4 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
 				>
 					{data.daily && (
 						<SidebarGroup group={data.daily} activeSessionId={activeSessionId} batching={batching} />

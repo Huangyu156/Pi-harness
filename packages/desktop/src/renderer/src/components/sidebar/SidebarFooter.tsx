@@ -10,7 +10,7 @@ export function SidebarFooter() {
 	const t = useT();
 	const setSettingsOpen = useSettingsStore((s) => s.setOpen);
 	return (
-		<div className="flex shrink-0 flex-col gap-px border-t border-border p-2">
+		<div className="flex shrink-0 flex-col gap-px p-2">
 			<button
 				type="button"
 				className="flex h-8 w-full items-center gap-[9px] rounded-[7px] px-2 text-[13.5px] text-ink-dim transition-colors hover:bg-hover hover:text-ink"

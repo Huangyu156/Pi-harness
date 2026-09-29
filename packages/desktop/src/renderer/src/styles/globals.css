@@ -712,6 +712,27 @@ code {
 	);
 }
 
+/* 滚动边界淡出：把边界的硬裁切换成渐变（顶栏下 = 对话正文上沿、左栏底部 = 会话列表下沿，
+   也就是原来那两条 1px 实线的位置）。两侧各自只在「那个方向还有内容」时淡出，属性由
+   lib/use-edge-fade.ts 按滚动位置写；不溢出的容器不挂属性，边缘保持干净。
+   用 alpha 逆罩而不是盖一层颜色：不引入任何色值（#000 在这里只是遮罩的「不透明」取值），
+   深浅主题共用一套，行自身的 hover 底色也跟着自然淡出。淡出高度旋钮 = --edge-fade-size。 */
+.edge-fade[data-fade-top="true"] {
+	mask-image: linear-gradient(to bottom, transparent 0, #000 var(--edge-fade-size, 20px));
+}
+.edge-fade[data-fade-bottom="true"] {
+	mask-image: linear-gradient(to top, transparent 0, #000 var(--edge-fade-size, 20px));
+}
+.edge-fade[data-fade-top="true"][data-fade-bottom="true"] {
+	mask-image: linear-gradient(
+		to bottom,
+		transparent 0,
+		#000 var(--edge-fade-size, 20px),
+		#000 calc(100% - var(--edge-fade-size, 20px)),
+		transparent 100%
+	);
+}
+
 /* 思考深度横条（模型弹层底部）：轨道 + 渐变填充 + 刻度 + 原生 range 滑块。
    三者共用一条中心线公式：刻度中心 x = 填充宽 = 滑块中心 = calc((100% - 26px) * pos + 13px)。
    26px = 轨道高度 = 滑块直径：滑块走到两端时左右各占半个滑块，刻度跟着内缩才不会顶出条外/被滑块盖偏。
@@ -1243,17 +1264,38 @@ code {
 /* ---- 左侧栏（Codex 式常驻导航）：push 式宽度过渡，收起 = 宽 0 彻底藏起（不留图标条）。
    内层固定 240 宽：过渡期间内容被整体推走而不是被横向挤压（否则文字会边缩边换行） ---- */
 .sidebar {
+	position: relative;
 	flex: none;
 	width: 240px;
 	overflow: hidden;
-	border-right: 1px solid var(--color-border);
 	background: var(--color-canvas);
 	transition: width 0.4s cubic-bezier(0.32, 0.72, 0, 1);
+	/* 与对话区的分界不再用 1px 实线 border：改成**中段实、两头淡出**的发丝线（同 `.fade-rule` 语言，竖直用）。
+	   border 换成伪元素后内容区宽了 1px（border-box 下原来被 border 吃掉那 1px），总宽不变。
+	   中段实线长度占比是唯一旋钮（50% = 上下各 25% 都在淡）。 */
+	--sidebar-rule-solid: 50%;
 }
-/* 收起：宽度与右边框一起归 0（只宽 0 会留下 1px 的透明边框，聊天列拿不到那 1px） */
+.sidebar::after {
+	content: "";
+	position: absolute;
+	top: 0;
+	bottom: 0;
+	right: 0;
+	width: 1px;
+	background: linear-gradient(
+		to bottom,
+		transparent 0%,
+		var(--color-rule) calc(50% - var(--sidebar-rule-solid) / 2),
+		var(--color-rule) calc(50% + var(--sidebar-rule-solid) / 2),
+		transparent 100%
+	);
+}
+/* 收起：宽度归 0，发丝线一起不画（只宽 0 会留一条 1px 的线；聊天列能不能拿到那 1px 与收起前一致） */
 .sidebar.is-collapsed {
 	width: 0;
-	border-right-width: 0;
+}
+.sidebar.is-collapsed::after {
+	display: none;
 }
 .sidebar-inner {
 	width: 240px;

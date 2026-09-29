@@ -11,6 +11,8 @@
 | 全 app 卡死、日志/磁盘分钟级 GB 暴涨、renderer unresponsive | 一 · 0.4.6 冻结事故 |
 | 流式期间白屏、`error #185`、无限重渲染整树卸载 | 一 · 0.5.0 白屏事故；四 · Zustand selector（#185 另一成因） |
 | 点击对话里的相对文件链接后白屏 | 四 · Markdown 相对链接会导航 app 主窗口（2026-09-23） |
+| 比像素核验视觉时取样偏了、以为改动没生效 | 四 · CDP `clip.scale` 再乘一次 DPR（2026-09-29） |
+| 改了滚动条宽度但截图里看不到，以为没生效 | 四 · CDP 截图不绘制滚动条，只能力槽宽（2026-09-29） |
 | 扩展注册的工具模型用不了、模型说「工具列表为 none」 | 二 · createAgentSession tools 白名单 |
 | 设置页永久 Loading、模型列表为空 | 二 · runtime.refresh 网络挂起 / getAvailable 返回空 |
 | 权限 confirm 弹窗不生效 | 二 · bindExtensions 注入点 |
@@ -306,6 +308,16 @@ pi SDK 必须声明进 `packages/desktop/package.json` dependencies（electron-b
   Enter → `{ type: "keyDown", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13, text: "\r", unmodifiedText: "\r" }` + `keyUp`；
   只发 `rawKeyDown` 会**照常派发 keydown 事件落到监听器上、但不产生 click**（页面里能收到 `keydown:Enter`，行为却像没按），看着像「按钮坏了」。
   Space 同样要给 `text: " "`。验证键盘可达性时别忘了分两步断言：**能聚焦**（`el.focus()` 后 `document.activeElement === el`，折叠态 `inert` 下应为 false）与**能触发**。
+
+### CDP 截图不绘制滚动条：只能力槽宽（2026-09-29）
+
+`::-webkit-scrollbar` 宽度改小（8px → 4px）后 CDP 截图里**看不到任何滚动条**，一度以为改动没生效。做了对照：临时往页面塞一个 `overflow-y: scroll` + `thin-scrollbar` 的 div，槽宽量到 4px，**截图里同样不画**——所以这是截图/合成器不绘制滚动条层，不是改动问题（与 headless 画板那次同一个坑）。判据用 `el.offsetWidth - el.clientWidth`：带类 4、去掉类 8，两次都在真机（dev 窗口）上量。
+
+### CDP `clip.scale` 是**再**乘一次 DPR：输出像素 = clip × scale × DPR（2026-09-29）
+
+比像素做视觉核验（强度/亮度/对齐）时踩过：`clip: { width: 300, height: 112, scale: 2 }` 在本机（DPR 2）拿到的是 **1200×448**，即 4x——按 2x 反推 CSS 坐标会让取样带整体偏移，看上去像"遮罩没生效"。要么统一 `scale: 1`（输出 = 2x，CSS 像素 × 2），要么把换算写成 `clip × scale × devicePixelRatio` 并断言一次实际尺寸。
+
+顺带一条可比对的核验手法：**同一滚动位置、同一 clip，只切被测属性（如 `dataset.fadeTop` 置 false），逐行取均值比亮度差**——比人眼看截图可靠（实测淡出带内 +24.9，带外 +0.0）。
 
 ### Tailwind 4 的 `rotate-*` 走 CSS `rotate` 属性，不是 `transform`（2026-09-19）
 
