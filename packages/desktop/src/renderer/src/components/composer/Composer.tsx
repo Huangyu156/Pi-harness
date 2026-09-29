@@ -22,7 +22,6 @@ import { QueueBar } from "./QueueBar";
 import { QuoteChip } from "./QuoteChip";
 import { SendErrorBar } from "./SendErrorBar";
 import { SlashMenu } from "./SlashMenu";
-import { ThinkingPicker } from "./ThinkingPicker";
 import { useAtCompletion } from "./use-at-completion";
 import { useComposerSend } from "./use-composer-send";
 import { useSlashMenu } from "./use-slash-menu";
@@ -421,9 +420,6 @@ export function Composer({ centered = false }: { centered?: boolean }) {
 						<RegionHost region={UI_REGIONS.ComposerFooter} />
 						<div className={readOnly ? "pointer-events-none opacity-40" : undefined}>
 							<ModelPicker />
-						</div>
-						<div className={readOnly ? "pointer-events-none opacity-40" : undefined}>
-							<ThinkingPicker />
 						</div>
 						{isStreaming && !hasContent ? (
 							<button

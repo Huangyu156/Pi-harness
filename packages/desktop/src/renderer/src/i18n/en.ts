@@ -74,7 +74,7 @@ export const en: Messages = {
 		modelSearchEmpty: "No matching models",
 		modelSearchClear: "Clear search",
 		modelSwitch: "Switch model",
-		thinkingSwitch: "Switch thinking level",
+		thinkingDepth: "Thinking depth",
 		addImage: "Add image",
 		imageUnsupported:
 			"The current model doesn't support image input — remove the image or switch to a multimodal model",

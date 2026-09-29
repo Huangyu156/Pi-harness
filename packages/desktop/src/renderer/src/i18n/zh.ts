@@ -74,7 +74,7 @@ export const zh = {
 		modelSearchEmpty: "没有匹配的模型",
 		modelSearchClear: "清空搜索",
 		modelSwitch: "切换模型",
-		thinkingSwitch: "切换思考深度",
+		thinkingDepth: "思考深度",
 		addImage: "添加图片",
 		imageUnsupported: "当前模型不支持图片输入，请移除图片或切换多模态模型",
 		removeImage: "移除图片",

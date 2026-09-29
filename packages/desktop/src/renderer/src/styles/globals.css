@@ -86,6 +86,14 @@
 	--shadow-dialog: 0 12px 40px rgba(0, 0, 0, 0.18);
 	--scrollbar-thumb: #d4d4d4;
 	--scrollbar-thumb-hover: #bfbfbf;
+	/* 思考深度横条（设计稿 .local/design/ux/model-thinking-picker）：蓝紫渐变 + 白滑块 + 白刻度，
+	   深浅各一份。填充铺满整条轨道、靠 clip-path 裁出宽度（见 .think-fill）：
+	   直接改 width 会把 linear-gradient 一起拉伸，同一档位在不同档位下颜色会变。 */
+	--bar-grad: linear-gradient(96deg, #4c6ef5 0%, #7c3aed 52%, #a855f7 100%);
+	--bar-knob: #ffffff;
+	--bar-tick-on: rgba(255, 255, 255, 0.55);
+	/* 淡出分隔线中段的颜色（见 .fade-rule）：两端渐隐会掉一档视觉强度，所以比 border 稍实 */
+	--color-rule: #d8dce3;
 }
 
 [data-theme="dark"] {
@@ -104,6 +112,11 @@
 	--color-on-ink: #17171a;
 	--color-accent: #8b5cf6;
 	--color-on-accent: #ffffff;
+	/* 思考深度横条深色一套（比浅色更亮），其余见 :root 处注释 */
+	--bar-grad: linear-gradient(96deg, #5b7cfa 0%, #8b5cf6 52%, #b06bfb 100%);
+	--bar-knob: #ffffff;
+	--bar-tick-on: rgba(255, 255, 255, 0.55);
+	--color-rule: #34343c;
 	/* 首页字标手稿构造版深色：描边与构造线压到 canvas 上刚好可辨的灰 */
 	--lg-ol: #5f5f66;
 	--lg-c1: #35353c;
@@ -675,12 +688,140 @@ code {
 }
 
 /* 对话消息流比全局滚动条更轻，避免右侧视觉重量抢过内容。
-   Electron 的 Chromium 只走 WebKit 伪元素；不设 scrollbar-width，避免触发系统轨道绘制。 */
-.chat-scrollbar::-webkit-scrollbar {
+   Electron 的 Chromium 只走 WebKit 伪元素；不设 scrollbar-width，避免触发系统轨道绘制。
+   共用类 .thin-scrollbar（弹层列表等也用），.chat-scrollbar 保留为别名（既有调用点不改）。 */
+.chat-scrollbar::-webkit-scrollbar,
+.thin-scrollbar::-webkit-scrollbar {
 	width: 4px;
 }
-.chat-scrollbar::-webkit-scrollbar-thumb {
+.chat-scrollbar::-webkit-scrollbar-thumb,
+.thin-scrollbar::-webkit-scrollbar-thumb {
 	border-radius: 3px;
+}
+
+/* 淡出分隔线：1px 高的发丝线，中段留雾感、两端各 22% 渐隐到透明（没有明确的线头）。
+   用在中弹层的搜索行下 / 列表下（替代实线 border）。 */
+.fade-rule {
+	height: 1px;
+	background: linear-gradient(
+		90deg,
+		transparent 0%,
+		var(--color-rule) 22%,
+		var(--color-rule) 78%,
+		transparent 100%
+	);
+}
+
+/* 思考深度横条（模型弹层底部）：轨道 + 渐变填充 + 刻度 + 原生 range 滑块。
+   三者共用一条中心线公式：刻度中心 x = 填充宽 = 滑块中心 = calc((100% - 26px) * pos + 13px)。
+   26px = 轨道高度 = 滑块直径：滑块走到两端时左右各占半个滑块，刻度跟着内缩才不会顶出条外/被滑块盖偏。
+   用原生 input[type=range] 叠在渐变与刻度之上：←→ / Home / End / 可聚焦 / 无障碍语义都是白拿的；
+   但可见的滑块是自绘的（原生 thumb 透明化）——原生 thumb 没法加位移动画。 */
+.think-slider {
+	/* 换档位动画：280ms + 轻微回弹（app 里展开类动画用的是同族缓动）。
+	   滑块和填充（clip-path 裁出来的边界）用同一条曲线：回弹幅度小于滑块半径，
+	   所以填充边界的过冲始终藏在滑块下面、看不出脱节 —— 千万别只给滑块加回弹。
+	   时长偏长是有意的：太快（<200ms）在 47px 的小位移上几乎看不出动过。 */
+	--bar-anim: 280ms cubic-bezier(0.34, 1.12, 0.64, 1);
+	position: relative;
+	height: 26px;
+}
+.think-track {
+	position: absolute;
+	inset: 0;
+	border-radius: 9999px;
+	background: var(--color-hover);
+}
+.think-fill {
+	position: absolute;
+	inset: 0;
+	border-radius: 9999px;
+	background: var(--bar-grad);
+	clip-path: inset(0 calc(100% - var(--fillw, 13px)) 0 0);
+	transition: clip-path var(--bar-anim);
+}
+.think-tick {
+	position: absolute;
+	top: 50%;
+	width: 5px;
+	height: 5px;
+	border-radius: 50%;
+	transform: translate(-50%, -50%);
+	background: var(--color-border-strong);
+	transition: background-color var(--bar-anim);
+}
+.think-tick[data-passed="true"] {
+	background: var(--bar-tick-on);
+}
+.think-range {
+	position: absolute;
+	inset: 0;
+	width: 100%;
+	height: 26px;
+	margin: 0;
+	appearance: none;
+	background: transparent;
+	cursor: pointer;
+}
+.think-range::-webkit-slider-runnable-track {
+	height: 26px;
+	background: transparent;
+}
+/* 原生 thumb 只留 26px 拖拽热区、视觉全透明：换档位的位移动画做在自绘滑块 .think-knob 上
+   （原生 thumb 的位置由引擎直接给定，没法 transition） */
+.think-range::-webkit-slider-thumb {
+	appearance: none;
+	width: 26px;
+	height: 26px;
+	border-radius: 50%;
+	border: none;
+	background: transparent;
+	box-shadow: none;
+}
+/* 自绘滑块：rail 从轨道左端缩进 13px（= 半径）、宽 = 轨道宽 - 26px，整体平移 `--pos × 自身宽`；
+   knob 再反向缩进 13px 把自己摆在 rail 左端 → pos=0 时中心 = 轨道左 + 13px，
+   pos=1 时 = 轨道右 - 13px，正好压在首/末刻度上（与刻度、填充同一条中心线） */
+.think-knob-rail {
+	position: absolute;
+	left: 13px;
+	top: 0;
+	width: calc(100% - 26px);
+	height: 26px;
+	transform: translateX(calc(var(--pos, 0) * 100%));
+	transition: transform var(--bar-anim);
+	pointer-events: none;
+}
+.think-knob {
+	position: absolute;
+	left: -13px;
+	top: 0;
+	width: 26px;
+	height: 26px;
+	border-radius: 50%;
+	background: var(--bar-knob);
+	box-shadow: var(--shadow-pop);
+}
+/* 拖拽中不做动画：滑块要严格跟手（点轨道瞬时跳到位也是同一条路） */
+.think-slider[data-dragging="true"] .think-knob-rail,
+.think-slider[data-dragging="true"] .think-fill,
+.think-slider[data-dragging="true"] .think-tick {
+	transition: none;
+}
+/* 焦点环落在滑块上而不是整条轨道外框（滑条不是按钮，外框会显得很笨） */
+.think-range:focus-visible {
+	outline: none;
+}
+.think-range:focus-visible ~ .think-knob-rail .think-knob {
+	box-shadow:
+		var(--shadow-pop),
+		0 0 0 2px color-mix(in srgb, var(--color-accent) 35%, transparent);
+}
+@media (prefers-reduced-motion: reduce) {
+	.think-fill,
+	.think-tick,
+	.think-knob-rail {
+		transition: none;
+	}
 }
 
 /* Working 文字高亮扫过（codex 风格）：光带只扫文字本身，背景不变（background-clip: text）。
