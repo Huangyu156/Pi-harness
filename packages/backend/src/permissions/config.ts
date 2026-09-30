@@ -22,19 +22,31 @@ export interface PermissionConfig {
 const ACTIONS: ReadonlySet<string> = new Set(["allow", "ask", "deny"]);
 
 /** agent 自身权限/信任/凭证配置的文件名（默认规则自保护：改动这些文件必须确认） */
-const PROTECTED_FILES = ["permissions.json", "workspaces.json", "auth.json", "trust.json"] as const;
+const PROTECTED_FILES = [
+	"permissions.json",
+	"workspaces.json",
+	"auth.json",
+	"trust.json",
+	"mcp-auth.json",
+] as const;
 
 /**
  * 默认配置：宽松 + 高危兜底（coding agent 效率优先）。
  * 只读工具/编辑/自定义工具默认 allow；bash 默认 allow，枚举的高危命令 ask；
  * 读写分离：路径工具越界时读放行、写确认；系统临时区（tmpdir ∪ /tmp）默认放行
  * （temporary 动作，rm 兜底同理豁免）；agent 自身权限/信任/凭证配置改动必确认。
+ * MCP 例外：远端工具名（含 directTools 直投的 mcp__<server>__<tool>）无法在配置里预先枚举，
+ * 吃全局 "*" = allow 就等于零确认放行远端删文件，故读元数据放行、实际调用与脚本一律 ask。
  */
 export const DEFAULT_PERMISSION_CONFIG: PermissionConfig = {
 	enabled: true,
 	outside: { read: "allow", write: "ask", temporary: "allow" },
 	rules: {
 		"*": "allow",
+		mcp: { "*": "ask", search: "allow", describe: "allow" },
+		mcpScript: "ask",
+		// 直投工具（工具名前缀键；精确键可在 permissions.json 里按工具覆盖）
+		"mcp__*": { "*": "ask" },
 		bash: {
 			"*": "allow",
 			"sudo *": "ask",
@@ -61,6 +73,7 @@ export const DEFAULT_PERMISSION_CONFIG: PermissionConfig = {
 			"*workspaces.json*": "ask",
 			"*auth.json*": "ask",
 			"*trust.json*": "ask",
+			"*mcp-auth.json*": "ask",
 		},
 		// 同自保护：edit/write 改权限/信任/凭证文件必确认（路径模式尾缀匹配）
 		...Object.fromEntries(

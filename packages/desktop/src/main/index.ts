@@ -14,6 +14,10 @@ import { loadUiState } from "./ui-state";
 import { initUpdater, scheduleAutoUpdateCheck } from "./updater";
 import { applyChromeTheme, createWindow, markQuitting, resolveTheme } from "./window";
 
+// main 进程按 ESM 打包（package.json type=module），`__dirname` 在 ESM 里不存在；
+// 与 window.ts 同一套写法（import.meta.dirname 由 Electron 43 / Node 22 提供）
+const __dirname = import.meta.dirname;
+
 const log = createLogger("main");
 let backend: PiBackend;
 let uiPluginsManager: UiPluginManager;
@@ -78,6 +82,8 @@ app.whenReady().then(async () => {
 	await initUpdater();
 	scheduleAutoUpdateCheck();
 	const uiState = await loadUiState();
+	// 项目级 MCP 配置锚点：上次使用的项目目录（renderer 每次落盘 ui-state 时同步更新）
+	if (uiState?.lastCwd) backend.mcp.setProjectCwd(uiState.lastCwd);
 	// main 进程原生主题与 app 设置对齐（Windows 窗口按钮覆盖层/后续主题切换的 system 解析依赖它）
 	nativeTheme.themeSource = uiState?.theme ?? "system";
 	createWindow(resolveTheme(uiState?.theme));

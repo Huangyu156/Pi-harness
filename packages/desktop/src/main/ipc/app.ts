@@ -15,10 +15,10 @@ import { registerInvokeHandlers } from "./invoke";
 const REPO_URL = "https://github.com/Jaxton07/percho";
 
 /**
- * 应用域：窗口级功能（不依赖 PiBackend 会话状态的部分也在此，backend 参数仅为对齐签名）。
+ * 应用域：窗口级功能（不依赖 PiBackend 会话状态的部分也在此，backend 参数用于 MCP 项目目录同步）。
  * tabs/ui-state 持久化、背景图、更新、文件/目录对话框、git 分支、外链与应用信息。
  */
-export function registerAppIpc(_backend: PiBackend): void {
+export function registerAppIpc(backend: PiBackend): void {
 	registerInvokeHandlers(APP_CHANNELS, {
 		saveFileDialog: async ({ defaultName, content }) => {
 			const window = BrowserWindow.getAllWindows()[0];
@@ -73,6 +73,10 @@ export function registerAppIpc(_backend: PiBackend): void {
 		saveUiState: ({ state }) => {
 			// 主题变更 → 对齐 main 原生主题（themeSource 赋值触发 updated 事件，窗口底色/Windows 按钮覆盖层随之刷新）
 			if (state.theme) nativeTheme.themeSource = state.theme;
+			// 项目目录变化 → 同步给 MCP（项目级 `mcp.json` 的锚点；变化会广播 mcp:event changed）
+			if (typeof state.lastCwd === "string" && state.lastCwd.length > 0) {
+				backend.mcp.setProjectCwd(state.lastCwd);
+			}
 			return saveUiState(state);
 		},
 		pickBackgroundImage: () => pickBackgroundImage(BrowserWindow.getAllWindows()[0]),

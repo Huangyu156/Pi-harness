@@ -3,6 +3,7 @@ export * from "./extension-dialog";
 export * from "./ipc";
 export * from "./lan";
 export * from "./marquee-motion";
+export * from "./mcp";
 export * from "./packages";
 export * from "./session";
 export * from "./settings";

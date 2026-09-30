@@ -1,5 +1,17 @@
 import type { ExtensionDialogRespond } from "./extension-dialog";
 import type { LanStatus } from "./lan";
+import type {
+	McpAuthResult,
+	McpCallResult,
+	McpImportCandidate,
+	McpImportPick,
+	McpLogPage,
+	McpResourceInfo,
+	McpServerConfig,
+	McpServerView,
+	McpTestResult,
+	McpToolInfo,
+} from "./mcp";
 import type { CatalogPackageType, CatalogSearchResult, ConfiguredPackageInfo } from "./packages";
 import type {
 	AppInfo,
@@ -147,6 +159,47 @@ export const PACKAGES_CHANNELS = {
 	removePackage: ch("packages:remove")<{ source: string; scope: "user" | "project" }, void>(),
 	/** 列出 settings.json 已配置的包（「已安装」态匹配用） */
 	listConfiguredPackages: ch("packages:listConfigured")<void, ConfiguredPackageInfo[]>(),
+} as const;
+
+/**
+ * MCP 域：服务器配置管理 + 连接自检 + 工具/资源浏览 + OAuth 登录 + 全平台配置导入。
+ * 凭据只上行（upsertServer 的 config 可含密钥），下行视图恒为脱敏的 McpServerView。
+ */
+export const MCP_CHANNELS = {
+	/** 列出全部服务器（用户级 + 项目级合并后的视图，凭据已脱敏） */
+	listServers: ch("mcp:listServers")<void, McpServerView[]>(),
+	/** 新增或覆盖一个服务器配置（按 name 主键；写入对应来源文件） */
+	upsertServer: ch("mcp:upsertServer")<{ name: string; config: McpServerConfig }, McpServerView>(),
+	/** 删除服务器配置（不动凭据文件里已无引用的条目） */
+	removeServer: ch("mcp:removeServer")<{ name: string }, void>(),
+	/** 启用/停用（停用 = 不连接、不注册工具，配置保留） */
+	setEnabled: ch("mcp:setEnabled")<{ name: string; enabled: boolean }, McpServerView>(),
+	/** 逐工具直投开关（默认关：走 mcp 代理工具省 context） */
+	setDirectTools: ch("mcp:setDirectTools")<{ name: string; enabled: boolean }, McpServerView>(),
+	/** 连接自检：建连 + 世代判定 + 能力清点，返回耗时与诊断日志 */
+	testServer: ch("mcp:testServer")<{ name: string }, McpTestResult>(),
+	/** 已缓存/即时拉取的远端工具列表 */
+	listTools: ch("mcp:listTools")<{ name: string }, McpToolInfo[]>(),
+	/** 远端资源列表 */
+	listResources: ch("mcp:listResources")<{ name: string }, McpResourceInfo[]>(),
+	/** 手动调用一个远端工具（抽屉内试用；不经权限门控，属用户显式操作） */
+	callTool: ch("mcp:callTool")<{ name: string; tool: string; args?: unknown }, McpCallResult>(),
+	/** 读服务器日志（stderr / HTTP 诊断；cursor 为上次返回的行号） */
+	readLog: ch("mcp:readLog")<{ name: string; cursor?: number }, McpLogPage>(),
+	/** 启动 OAuth 登录（事件经 onMcpEvent 的 auth 载荷推送，流程结束 resolve，取消不算错误） */
+	authStart: ch("mcp:authStart")<{ name: string; flowId: string }, McpAuthResult>(),
+	/** 应答 OAuth 流程中的输入/选择提示（promptId 已被外部取消时静默忽略） */
+	authRespond: ch("mcp:authRespond")<{ flowId: string; promptId: string; value: string }, void>(),
+	/** 取消进行中的 OAuth 流程（未知 flowId 静默忽略） */
+	authCancel: ch("mcp:authCancel")<{ flowId: string }, void>(),
+	/** 扫描本机各宿主 MCP 配置（只读；Claude Desktop / Claude Code / Cursor / VS Code / Cline / Windsurf / Codex / 通用共享文件） */
+	scanHostConfigs: ch("mcp:scanHostConfigs")<void, McpImportCandidate[]>(),
+	/** 导入所选服务器到 Percho 用户级配置（同名覆盖；绝不写宿主文件） */
+	importServers: ch("mcp:importServers")<{ picks: McpImportPick[] }, void>(),
+	/** 用系统默认编辑器打开 MCP 配置文件（不存在则先落盘空骨架） */
+	openConfig: ch("mcp:openConfig")<void, void>(),
+	/** 丢弃缓存并重连全部服务器（改配置/装证书后用） */
+	reload: ch("mcp:reload")<void, void>(),
 } as const;
 
 /** LAN 观察域：本机服务开关与远程控制开关 */
@@ -306,6 +359,7 @@ export const CHANNEL_TABLE = {
 	...SESSION_CHANNELS,
 	...SETTINGS_CHANNELS,
 	...PACKAGES_CHANNELS,
+	...MCP_CHANNELS,
 	...APP_CHANNELS,
 	...LAN_CHANNELS,
 	...EXTENSION_DIALOG_CHANNELS,
@@ -356,6 +410,8 @@ const EVENT_CHANNELS = {
 	UpdateEvent: "update:event",
 	/** UI 插件事件（changed/config） */
 	UiPluginsEvent: "uiPlugins:event",
+	/** MCP 事件（status/log/auth/changed） */
+	McpEvent: "mcp:event",
 	/** 用户点了关闭窗口且 main 已拦下（等渲染端弹退出确认）；payload 为空 */
 	QuitRequested: "app:quit-requested",
 } as const;

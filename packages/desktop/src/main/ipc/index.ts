@@ -7,6 +7,7 @@ import { onUpdateState } from "../updater";
 import { registerAppIpc } from "./app";
 import { registerExtensionDialogIpc } from "./extension-dialogs";
 import { registerLanIpc } from "./lan";
+import { registerMcpIpc } from "./mcp";
 import { registerPackagesIpc } from "./packages";
 import { registerSessionsIpc } from "./sessions";
 import { registerSettingsIpc } from "./settings";
@@ -37,6 +38,7 @@ export function registerIpc(
 	registerSessionsIpc(backend);
 	registerSettingsIpc(backend);
 	registerPackagesIpc(backend);
+	registerMcpIpc(backend);
 	registerAppIpc(backend);
 	registerExtensionDialogIpc(backend);
 	registerUiPluginsIpc(uiPluginsManager);
@@ -60,5 +62,7 @@ export function registerIpc(
 	forward(backend.onExtensionNotify.bind(backend), IpcChannels.ExtensionNotify);
 	forward(backend.onExtensionEditorText.bind(backend), IpcChannels.ExtensionEditorText);
 	forward(backend.onLoginEvent.bind(backend), IpcChannels.SettingsLoginEvent);
+	// MCP 四类事件（status/log/auth/notice）+ 配置变更
+	forward(backend.onMcpEvent.bind(backend), IpcChannels.McpEvent);
 	forward(onUpdateState, IpcChannels.UpdateEvent);
 }

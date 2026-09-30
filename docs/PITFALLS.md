@@ -72,6 +72,11 @@
 | 会话压缩后当时历史还在，过段时间重新打开却只剩压缩后的内容 | 四 · UI 历史不能读取被压缩的模型上下文（2026-09-22） |
 | 给 store 加模块级订阅后，某些入口报 `Cannot read properties of undefined (reading 'subscribe')` | 四 · 同章节「renderer 模块图不许有环」（2026-09-21） |
 | 反复被 GC 卸载的已置顶会话，顶栏胶囊也一起消失了 | 四 · 同章节「写穿」：胶囊与左栏同源（tabs → 目录兜底） |
+| MCP modern 服务器回 400 `-32602 ... missing the required per-request envelope key(s): _meta` | 六 · modern 探测请求必须自带 `_meta`（2026-09-30） |
+| MCP 服务器只在 400 里回 `id:null` / 自造字符串 id → 请求挂到 60s 超时 | 六 · HTTP 响应按绑定层的归属 id 关联（2026-09-30） |
+| 只声明 tools 的 MCP 服务器被列资源 → 裸 `-32601 Method not found` | 六 · 列资源/提示前先看能力面（2026-09-30） |
+| `npm run dev` 起不来：main 报 `ReferenceError: __dirname is not defined`，窗口永不出现 | 三 · ESM 主进程里没有 `__dirname`（2026-09-30） |
+| MCP 直投工具开了却没有（或删了服务器还在 spawn 子进程） | 六 · 直投工具是会话级快照 + drop 要作废在途建连（2026-09-30） |
 
 ## 一、事故复盘（含可复用诊断手法）
 
@@ -208,6 +213,14 @@ tail -5 .local/dev-logs/dev*.log                                    # 没有 “
 ### preload 必须是 CJS
 
 sandbox 下渲染进程不加载 electron-vite 默认的 ESM 产物。config 强制 `format: "cjs", entryFileNames: "index.cjs"`；`main/window.ts` 加载 `../preload/index.cjs`。
+
+### ESM 主进程里没有 `__dirname`（2026-09-30 实测）
+
+症状：`npm run dev` 起得来 vite、但那台 Electron 一直没有窗口——main 日志只有 `UnhandledPromiseRejection: ReferenceError: __dirname is not defined`，栈落在 `app.whenReady().then(async () => {` 里（`packages/desktop/src/main/index.ts` 构造 `PiBackend` 时传的 `desktopIntegration.additionalSkillPaths` 调了 `uiPluginsResourcesDir()`）。
+
+原因：`packages/desktop/package.json` 是 `"type": "module"`，electron-vite 打出来的 main 是 ESM（`out/main/index.js` 以 `file://` 装载），**ESM 里没有 `__dirname`**。同一批代码里 `window.ts` 已经用 `const __dirname = import.meta.dirname;` 补过，`ui-plugins/seeder.ts` 与 `main/index.ts` 漏了；异常又被 async 回调吞成 unhandled rejection，于是只表现为「窗口没出来」而不是明确的启动失败。
+
+修法：与 `window.ts` 一致，在用到 `__dirname` 的模块顶部补 `const __dirname = import.meta.dirname;`（Electron 43 / Node 22 支持）。排查顺序：先看 main 日志有没有 `UnhandledPromiseRejection`，别从 renderer 侧找。
 
 ### `externalizeDepsPlugin` 会把 workspace 依赖也外部化
 
@@ -638,3 +651,53 @@ pgrep -f "electron-vite" | xargs -r kill -9
 ### 已开源：github.com/Jaxton07/percho
 
 git remote 走 SSH（本机直连 github.com:443 不通）。`main` 有分支保护（PR + CI `check` 必过 + squash merge），Release 由 tag 触发（`.github/workflows/release.yml`）。
+
+## 六、MCP 远端服务器实测（2026-09-30）
+
+四条都来自「真机接入公网 MCP 服务器」：context7（modern 2026-07-28）、Cloudflare docs（modern，只声明
+tools+prompts）、DeepWiki（legacy 2025-06-18，且明确拒绝 modern 探针）、GitMCP（legacy 2025-03-26 +
+`Mcp-Session-Id`）。共同点：**服务器会按规范挑请求的毛病**，仓内 stdio fixture 永远测不出来。
+
+### modern 探测请求必须自带 `_meta`（`mcp` 域）
+
+症状：clients 连 context7 / Cloudflare docs 全部失败，错误是 `Server rejected protocol version 2026-07-28
+without offering alternatives`。服务器原话（`MCP-Protocol-Version` 头 + 400）是：
+
+```
+-32602 Invalid params: the MCP-Protocol-Version header names protocol revision 2026-07-28,
+       but the request is missing the required per-request envelope key(s): _meta
+```
+
+原因：`client.ts` 用 `eraValue === "modern"` 决定要不要加 `_meta`，而**世代探针跑在握手成功之前**——
+`eraValue` 还是 `null`，于是发出去的是「legacy 信封 + modern 版本头」，被现代服务器合规地拒收。
+修法：改用独立的 `modernEnvelope` 标志，在 `handshakeModern()` 一进门就置 true、`handshakeLegacy()` 置 false。
+反向不变量同样要有测试：legacy 的 `initialize` 绝不能带 `_meta`。
+
+### HTTP 响应按绑定层的归属 id 关联（`mcp` 域）
+
+症状：DeepWiki / GitMCP 接入后 `server/discover` 一直挂到 **60s 超时**，日志只有 `response for unknown id`。
+它们的 400 分别回 `"id":"server-error"` 与 `"id":null`——都不是我们发出去的 id，而 client 只按 body 里的 id
+找 pending，于是响应被丢进「未知 id」分支，请求永不结算。
+
+修法：`TransportDelivery.requestId` 由传输层填（HTTP 系本来就知道这次 POST 发的是哪条请求），client 关联时
+`delivery.requestId ?? message.id`。**服务器不回规范 id 是真实世界的常态**，绑定层比 body 更可信。
+
+### 列资源/提示前先看能力面（`mcp` 域）
+
+症状：Cloudflare docs 只声明 `tools`+`prompts`，抽屉点「资源」拿到裸 `-32601 Method not found`。
+修法：`McpService.listResources/listPrompts` 先 `hasCapability()`，缺失就抛
+`does not declare the "resources" capability; it exposes: tools, prompts`。别返回空列表——那是更糟的谎话。
+
+### 直投工具是会话级快照；`drop` 要作废在途建连（`mcp` 域）
+
+两条都在 dev 冒烟里露头：
+
+- **直投工具「开了却没有」**：SDK 的工具集在 `createAgentSession` 时固定，`directToolSnapshot()` 又是同步读缓存，
+  所以开/关直投只对**新建会话**生效，且需要先连上服务器预热（面板「测试连接」或下次会话触发）。生态同款语义
+  （pi-mcp-adapter 要求 `/reload`），UI 上有一行 hint 说明。
+- **删了服务器还在 spawn 子进程**：`registry.drop()` 原来只关「当时已存在的 client」，而在途的建连完成后会把
+  新 client 装回条目——配置已删，空闲回收也跳过它，于是连接与子进程永久泄漏；`connecting` 不置空还会让
+  紧接着的连接继承那次注定失败的建连（报 `superseded by a configuration change`）。
+  修法：`entry.generation` 世代号 + `drop` 时 `connecting = null` + 在途建连完成时校验世代（不符就关掉），
+  回归测试见 `packages/backend/test/mcp-registry.test.ts`。
+

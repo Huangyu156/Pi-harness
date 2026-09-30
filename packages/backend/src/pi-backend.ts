@@ -31,6 +31,7 @@ import type {
 	ImageInput,
 	LoadedResources,
 	LoginEventPayload,
+	McpEventPayload,
 	PermissionAnswer,
 	PermissionMode,
 	PermissionRequest,
@@ -56,6 +57,9 @@ import {
 } from "@percho/shared";
 import { Emitter } from "./emitter";
 import { createLogger } from "./log";
+import { makeMcpScriptTool } from "./mcp/script";
+import { McpService } from "./mcp/service";
+import { makeDirectMcpTools, makeMcpTool } from "./mcp/tools";
 import { PackageAdmin } from "./packages/admin";
 import { loadPermissionConfig } from "./permissions";
 import {
@@ -214,11 +218,20 @@ export class PiBackend {
 		getRuntime: () => this.getModelRuntime(),
 		send: (payload) => this.loginEmitter.emit(payload),
 	});
+	/** MCP 域（配置/连接/凭据/宿主导入）：状态、日志、OAuth 事件经 onMcpEvent 分发 */
+	readonly mcp: McpService;
+	private readonly mcpEmitter = new Emitter<McpEventPayload>();
 	/** 项目资源两阶段加载 + 信任决策 */
 	private readonly projectLoader: ProjectResourceLoader;
 
 	constructor(private readonly options: PiBackendOptions = {}) {
 		this.packages = new PackageAdmin({ registry: this.registry, defaultCwd: options.defaultCwd });
+		this.mcp = new McpService({
+			agentDir: getAgentDir(),
+			// 项目级 MCP 配置的锚点：desktop 在 ui-state 变化时经 setProjectCwd 同步真实项目目录
+			cwd: () => options.defaultCwd ?? process.cwd(),
+			send: (event) => this.mcpEmitter.emit(event),
+		});
 		this.projectLoader = new ProjectResourceLoader({
 			trustStore: this.trustStore,
 			ask: (dir, opts) => this.trustGate.ask(dir, opts),
@@ -249,6 +262,11 @@ export class PiBackend {
 					onEvent: (sessionId, event) => this.emitEvent(sessionId, event),
 				}),
 			);
+		}
+		// MCP 工具：零服务器时不注册（空工具白占 context）；直投工具是**同步快照**——SDK 的工具集
+		// 在会话构造时固定，所以开关直投/远端工具清单变化只对新建会话生效（生态同款语义）
+		if (this.mcp.enabledServerCount() > 0) {
+			tools.push(makeMcpTool(this.mcp), makeMcpScriptTool(this.mcp), ...makeDirectMcpTools(this.mcp));
 		}
 		return tools;
 	}
@@ -1050,6 +1068,11 @@ export class PiBackend {
 		return this.loginEmitter.subscribe(handler);
 	}
 
+	/** MCP 状态/日志/OAuth/配置变更事件（main 转发 renderer 的 `mcp:event`） */
+	onMcpEvent(handler: (payload: McpEventPayload) => void): () => void {
+		return this.mcpEmitter.subscribe(handler);
+	}
+
 	/** 扩展对话框请求/结算/通知/草稿预填订阅（main 进程转发 renderer 用） */
 	onExtensionDialogRequest(handler: (req: ExtensionDialogRequest) => void): () => void {
 		return this.extensionDialogRequestEmitter.subscribe(handler);
@@ -1172,7 +1195,12 @@ export class PiBackend {
 		this.trustGate.respond(requestId, answer);
 	}
 
-	dispose(): void {
+	/**
+	 * 释放后端。返回 Promise 是因为 MCP 子进程必须先杀干净再退出（registry.dispose →
+	 * transport.close → taskkill / SIGKILL）；Electron 的 `before-quit` 不等待返回值，
+	 * 但进程退场本身耗时远大于一次 taskkill。
+	 */
+	async dispose(): Promise<void> {
 		this.registry.disposeAll();
 		this.eventEmitter.clear();
 		this.permissionEmitter.clear();
@@ -1185,6 +1213,8 @@ export class PiBackend {
 		this.extensionEditorTextEmitter.clear();
 		this.trustGate.dispose();
 		this.traces.disposeAll();
+		await this.mcp.dispose();
+		this.mcpEmitter.clear();
 		log.info("backend disposed");
 	}
 

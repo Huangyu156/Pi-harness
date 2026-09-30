@@ -1,0 +1,11 @@
+# Codex 配置 fixture：合法 TOML，但含我们有意识没有建模的键（bearer_token_env_var）
+# → 按「宁缺勿错」整份跳过该宿主，连同一文件里形状正常的那台服务器也不导出
+model = "gpt-5"
+
+[mcp_servers.http-server]
+url = "https://example.test/mcp"
+bearer_token_env_var = "MCP_TOKEN"
+
+[mcp_servers.fs]
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-filesystem"]

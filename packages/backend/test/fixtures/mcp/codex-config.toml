@@ -1,0 +1,27 @@
+# Codex 配置 fixture：覆盖窄子集里的全部支持形状（顶层杂项、注释、跨行数组、内联表 env、env 子表、引号键名）
+model = "gpt-5"
+
+[mcp_servers.fs]
+command = "npx"
+args = [
+	"-y", # 行内注释
+	# 注释行
+	"@modelcontextprotocol/server-filesystem",
+	"/tmp",
+]
+env = { API_KEY = "abc", "MY-VAR" = 'literal value' }
+cwd = "/work"
+
+[mcp_servers.extra-env]
+command = "uvx"
+
+[mcp_servers.extra-env.env]
+EXTRA = "1"
+QUOTED = 'two words'
+
+[mcp_servers."web tools"]
+url = "https://example.test/mcp"
+startup_timeout_ms = 20000
+
+[projects."/some/path"]
+trust_level = "trusted"

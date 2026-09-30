@@ -6,6 +6,10 @@ import { app } from "electron";
 import { copyTree } from "./fs-tree";
 import { NAME_RE } from "./manifest";
 
+// main 进程按 ESM 打包（package.json type=module），`__dirname` 在 ESM 里不存在；
+// 与 window.ts 同一套写法（import.meta.dirname 由 Electron 43 / Node 22 提供）
+const __dirname = import.meta.dirname;
+
 const log = createLogger("ui-plugins");
 
 export function pluginsDir(): string {

@@ -47,8 +47,31 @@ export function matchPattern(pattern: string, text: string): boolean {
 const ACTION_PRIORITY: Record<PermissionAction, number> = { allow: 0, ask: 1, deny: 2 };
 
 /**
- * 单段求值：默认值 → "*" 全局动作 → 工具动作 → 工具模式表（后命中覆盖）。
- * matchText 为 null（自定义工具无结构化匹配文本）时只吃工具名级动作与全局兜底。
+ * 模式表求值：表项命中即覆盖动作（后命中覆盖，与既有「键序即评估序」一致）。
+ * matchText 为 null（无结构化匹配文本）时表内只有 `"*"` 兜底键参与——调用方已在工具名层面
+ * 命中规则，拿表内兜底动作比回落全局 allow 更接近配置意图；表内无 `"*"` 则动作不变。
+ */
+function applyPatternTable(
+	table: Record<string, PermissionAction>,
+	matchText: string | null,
+	action: PermissionAction,
+): PermissionAction {
+	let next = action;
+	for (const [pattern, patternAction] of Object.entries(table)) {
+		if (!ACTIONS.has(patternAction)) continue;
+		if (matchText === null ? pattern !== "*" : !matchPattern(pattern, matchText)) continue;
+		next = patternAction;
+	}
+	return next;
+}
+
+/**
+ * 单段求值：默认值 → "*" 全局动作 → 精确工具键 → 工具名通配键（含 `*` 的键，按对象插入序）。
+ * 精确工具键给出动作（字符串动作，或模式表 + 非空匹配文本）即为终局，通配键只在其缺席时生效。
+ * 工具名通配键是为 directTools 直投工具（mcp__<server>__<tool>）而来的扩展：这类工具名按服务器
+ * 动态注册，配置里无法逐条枚举，需要 `"mcp__*"` 这样的前缀键兜底；`"*"` 只是全局回退，
+ * 不是工具名模式，故排除在扫描外。不含 `*` 键的既有配置走的分支逐字节不变。
+ * matchText 为 null（自定义工具无结构化匹配文本）时精确键的模式表仍不参与（既有语义）。
  */
 function evaluateSingle(
 	rules: PermissionRules,
@@ -62,16 +85,19 @@ function evaluateSingle(
 		action = globalRule;
 	}
 	const toolRule = rules[toolName];
-	if (!toolRule) return action;
-	if (ACTIONS.has(toolRule as string)) {
-		return toolRule as PermissionAction;
+	if (typeof toolRule === "string") {
+		if (ACTIONS.has(toolRule)) return toolRule;
+	} else if (toolRule && matchText !== null) {
+		return applyPatternTable(toolRule, matchText, action);
 	}
-	if (typeof toolRule === "object" && matchText !== null) {
-		for (const [pattern, patternAction] of Object.entries(toolRule)) {
-			if (ACTIONS.has(patternAction) && matchPattern(pattern, matchText)) {
-				action = patternAction;
-			}
+	for (const [key, rule] of Object.entries(rules)) {
+		if (key === "*" || !key.includes("*")) continue;
+		if (!matchPattern(key, toolName)) continue;
+		if (typeof rule === "string") {
+			if (ACTIONS.has(rule)) action = rule as PermissionAction;
+			continue;
 		}
+		if (rule) action = applyPatternTable(rule, matchText, action);
 	}
 	return action;
 }
@@ -125,8 +151,48 @@ export function evaluateRules(
 	return evaluateSingle(rules, toolName, matchText, fallback);
 }
 
-/** 从 tool_call 输入提取匹配文本；无法提取（自定义工具）返回 null */
+/** directTools 直投工具的命名前缀：mcp__<server>__<tool>（与 mcp 代理工具的匹配主体 <server>__<tool> 同构） */
+const MCP_DIRECT_PREFIX = "mcp__";
+
+/** 类型守卫：非空字符串（MCP 输入字段普遍「有值才认」，避免空串拼出 `__tool` 这种伪主体） */
+function isNonEmptyString(value: unknown): value is string {
+	return typeof value === "string" && value.length > 0;
+}
+
+/**
+ * mcp 代理工具的匹配主体（规则键 / 记忆键 / 匹配文本三处共用的调用标识）：
+ * tool → `<server>__<tool>`（server 缺失或非字符串时用占位 `*`，便于 `*__read_file` 这类规则通配）；
+ * 其余元数据入口归一到 `resource:<uri>` / `prompt:<name>` / `describe` / `search`。
+ * 都不成立（空调用）返回 null，不编造主体——让它落回全局兜底而不是误命中某个规则键。
+ */
+function mcpMatchSubject(input: Record<string, unknown>): string | null {
+	if (isNonEmptyString(input.tool)) {
+		return `${isNonEmptyString(input.server) ? input.server : "*"}__${input.tool}`;
+	}
+	if (isNonEmptyString(input.resource)) return `resource:${input.resource}`;
+	const prompt = input.prompt;
+	if (isNonEmptyString(prompt)) return `prompt:${prompt}`;
+	// prompt 也可能是 {name, args} 对象（规范 prompts/get 形状）；name 经守卫收窄后才拼主体
+	if (prompt !== null && typeof prompt === "object") {
+		const name: unknown = "name" in prompt ? prompt.name : undefined;
+		if (isNonEmptyString(name)) return `prompt:${name}`;
+	}
+	if (isNonEmptyString(input.describe)) return "describe";
+	if (isNonEmptyString(input.search)) return "search";
+	return null;
+}
+
+/**
+ * 从 tool_call 输入提取匹配文本；无法提取返回 null。
+ * MCP 两个入口归一到同一套主体：代理工具 `mcp` 取 <server>__<tool>，directTools 直投工具
+ * （mcp__<server>__<tool>）去掉前缀同样取 <server>__<tool>——规则写法（含 "mcp__*" 通配键）
+ * 与会话/项目记忆键因此对两个入口都成立。
+ */
 export function matchTextFor(toolName: string, input: Record<string, unknown>): string | null {
+	if (toolName.startsWith(MCP_DIRECT_PREFIX)) {
+		const subject = toolName.slice(MCP_DIRECT_PREFIX.length);
+		return subject.length > 0 ? subject : null;
+	}
 	const value = (() => {
 		switch (toolName) {
 			case "bash":
@@ -144,6 +210,8 @@ export function matchTextFor(toolName: string, input: Record<string, unknown>): 
 			case "grep":
 			case "find":
 				return input.pattern;
+			case "mcp":
+				return mcpMatchSubject(input);
 			default:
 				return undefined;
 		}
@@ -172,9 +240,13 @@ const PATH_PATTERN_TOOLS = new Set(["read", "edit", "write", "ls", "show_image"]
 /**
  * ask 弹窗的模式键（PermissionGate 会话内记忆 + workspaces.json 项目级持久化）。
  * bash 取前两 token（第二 token 须为子命令形态如 `git push` 或 flag 形态如 `rm -rf`），
- * flag 规整让 allowAlways 粒度是「rm -rf*」而非「rm*」；路径工具用父目录前缀（pathToolPattern）。
+ * flag 规整让 allowAlways 粒度是「rm -rf*」而非「rm*」；路径工具用父目录前缀（pathToolPattern）；
+ * mcp 代理工具走通用分支取匹配主体（`mcp: <server>__<tool>`），直投工具用工具名本身——
+ * 两者粒度都落在单个远端工具上（绝不放大到整个 mcp 工具），且都能被 patternMatchesToolCall 回匹配。
  */
 export function suggestPattern(toolName: string, input: Record<string, unknown>): string {
+	// directTools 直投工具：权限面前工具名即全部身份，参数不参与（远端工具参数形态任意，编不出稳定粒度）
+	if (toolName.startsWith(MCP_DIRECT_PREFIX)) return toolName;
 	const matchText = matchTextFor(toolName, input);
 	if (toolName === "bash" && matchText) {
 		const tokens = matchText.trim().split(/\s+/);

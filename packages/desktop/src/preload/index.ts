@@ -7,6 +7,7 @@ import {
 	type InvokeApi,
 	IpcChannels,
 	type LoginEventPayload,
+	type McpEventPayload,
 	type PermissionRequest,
 	type PermissionResolved,
 	type PiApi,
@@ -50,6 +51,7 @@ const api: PiApi = {
 	onExtensionDialogResolved: makeSubscription<ExtensionDialogResolved>(IpcChannels.ExtensionDialogResolved),
 	onExtensionNotify: makeSubscription<ExtensionNotifyEvent>(IpcChannels.ExtensionNotify),
 	onExtensionEditorText: makeSubscription<ExtensionEditorTextEvent>(IpcChannels.ExtensionEditorText),
+	onMcpEvent: makeSubscription<McpEventPayload>(IpcChannels.McpEvent),
 };
 
 contextBridge.exposeInMainWorld("pi", api);
