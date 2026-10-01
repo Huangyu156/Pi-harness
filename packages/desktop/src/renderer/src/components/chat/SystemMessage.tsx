@@ -19,14 +19,15 @@ export function SystemMessage({ message }: { message: Extract<UIMessage, { kind:
 		}
 		return <CompactionDivider>{message.text}</CompactionDivider>;
 	}
-	const reason = t(`compaction.reason.${compact.reason}`);
+	const reason = compact.reason ? ` · ${t(`compaction.reason.${compact.reason}`)}` : "";
 
 	if (compact.status === "running") {
 		return (
 			<CompactionDivider>
 				<span className="h-3 w-3 animate-spin rounded-full border-2 border-border-strong border-t-ink-dim" />
 				<span>
-					{t("compaction.running")} · {reason}
+					{t("compaction.running")}
+					{reason}
 				</span>
 			</CompactionDivider>
 		);
@@ -34,7 +35,8 @@ export function SystemMessage({ message }: { message: Extract<UIMessage, { kind:
 	if (compact.status === "cancelled") {
 		return (
 			<CompactionDivider>
-				{t("compaction.cancelled")} · {reason}
+				{t("compaction.cancelled")}
+				{reason}
 			</CompactionDivider>
 		);
 	}
@@ -46,15 +48,19 @@ export function SystemMessage({ message }: { message: Extract<UIMessage, { kind:
 			</CompactionDivider>
 		);
 	}
+	// 实时事件带压缩前/后两个数；历史回放只有压缩前（压缩后估值不落盘）
 	const tokens =
-		compact.tokensBefore != null && compact.tokensAfter != null
-			? ` · ${formatTokens(compact.tokensBefore)} → ${formatTokens(compact.tokensAfter)}`
-			: "";
+		compact.tokensBefore == null
+			? ""
+			: compact.tokensAfter != null
+				? ` · ${formatTokens(compact.tokensBefore)} → ${formatTokens(compact.tokensAfter)}`
+				: ` · ${t("compaction.tokensBefore", { tokens: formatTokens(compact.tokensBefore) })}`;
 	return (
 		<div>
 			<CompactionDivider>
 				<span>
-					{t("compaction.done")} · {reason}
+					{t("compaction.done")}
+					{reason}
 					{tokens}
 				</span>
 				{compact.summary && (

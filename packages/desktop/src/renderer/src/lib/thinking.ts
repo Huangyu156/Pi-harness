@@ -2,6 +2,32 @@ import { THINKING_LEVELS } from "@percho/shared";
 
 export { THINKING_LEVELS, type ThinkingLevel } from "@percho/shared";
 
+/** 思考条滑块/刻度共用的直径（px），也是轨道高度（见 globals.css .think-slider 处注释） */
+export const THINKING_BAR_KNOB = 26;
+
+/** 脏值（不在 THINKING_LEVELS 里）判为非法档位 */
+export function isThinkingLevel(value: string): value is (typeof THINKING_LEVELS)[number] {
+	return (THINKING_LEVELS as readonly string[]).includes(value);
+}
+
+/** 档位名对应的 i18n key（脏值回落 medium，与旧 ThinkingPicker 行为一致） */
+export function thinkingLevelKey(level: string): `thinkingLevels.${(typeof THINKING_LEVELS)[number]}` {
+	return `thinkingLevels.${isThinkingLevel(level) ? level : "medium"}`;
+}
+
+/**
+ * 第 index 档在思考条上的归一化位置（0 = 最左端刻度，1 = 最右端刻度）。
+ *
+ * 刻度中心 x = 填充宽 = 滑块中心 = `calc((100% - 26px) * pos + 13px)`：滑块直径 = 轨道高度，
+ * 滑块走到两端时左右各占半个滑块，所以刻度也得跟着内缩 13px，否则首尾刻度会被滑块盖偏或顶出条外。
+ * count <= 1（非推理模型只给 off）时恒为 0，index 越界按端点夹紧。
+ */
+export function thinkingLevelPos(index: number, count: number): number {
+	if (count <= 1) return 0;
+	const clamped = Math.min(Math.max(index, 0), count - 1);
+	return clamped / (count - 1);
+}
+
 /**
  * 将当前档位收敛到模型支持的档位集合：
  *   1. 若 supported 已包含 level，直接返回；

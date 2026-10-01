@@ -1,5 +1,5 @@
 import type { ImageInput } from "@percho/shared";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { type MouseEvent as ReactMouseEvent, useCallback, useEffect, useRef, useState } from "react";
 import { getPi } from "../../api";
 import { useActiveModelInfo, useSessionReadOnly } from "../../hooks/use-session-state";
 import { useT } from "../../i18n";
@@ -22,10 +22,17 @@ import { QueueBar } from "./QueueBar";
 import { QuoteChip } from "./QuoteChip";
 import { SendErrorBar } from "./SendErrorBar";
 import { SlashMenu } from "./SlashMenu";
-import { ThinkingPicker } from "./ThinkingPicker";
+import { slashPresentation } from "./slash-label";
 import { useAtCompletion } from "./use-at-completion";
 import { useComposerSend } from "./use-composer-send";
 import { useSlashMenu } from "./use-slash-menu";
+
+/**
+ * 命中这些元素的 mousedown 不接管为「聚焦正文」：它们各有自己的交互或原生行为。
+ * `[data-composer-overlay]` = 模型/权限弹层根（弹层就渲染在输入框盒子里，不是 portal）。
+ */
+const COMPOSER_FOCUS_BLOCKERS =
+	"button, a, input, textarea, select, label, [role='menu'], [role='listbox'], [role='dialog'], [contenteditable='true'], [data-composer-overlay]";
 
 /**
  * 底部输入框：自动增高、Enter 发送、生成中变停止；centered 用于空态居中布局。
@@ -122,6 +129,22 @@ export function Composer({ centered = false }: { centered?: boolean }) {
 	const { sending, error, setError, feedback, showFeedback, ensureSession, runSlashCommand, handleSend } =
 		send;
 	const focusTextarea = () => textareaRef.current?.focus();
+
+	/**
+	 * 点盒子空白处也进入输入状态：正文只有一行高，正文与底部图标行之间的留白、图标行右侧
+	 * 的大片空隙原先点了没反应，还会把刚拿到的光标弄丢。
+	 *
+	 * 用 mousedown 而不是 click：焦点与原生聚焦同刻完成，不会先失焦再聚焦闪一下。
+	 * preventDefault 是关键 —— 否则 mousedown 的默认行为会把选区/焦点清掉。
+	 * 命中交互元素（按钮/输入/菜单/弹层…）一律不插手：那是它们自己的事，
+	 * 抢过来会让弹层刚开就被关、滑块拖不动。
+	 */
+	const handleComposerMouseDown = (event: ReactMouseEvent<HTMLDivElement>) => {
+		const target = event.target;
+		if (target instanceof Element && target.closest(COMPOSER_FOCUS_BLOCKERS)) return;
+		event.preventDefault();
+		textareaRef.current?.focus();
+	};
 	const isStreaming = transcript.phase === "streaming" || sending;
 	const placeholder = readOnly
 		? t("composer.placeholderReadOnly")
@@ -146,6 +169,9 @@ export function Composer({ centered = false }: { centered?: boolean }) {
 		showFeedback,
 		setError,
 	});
+
+	const selectedSlashCommand = slash.slashCommands.find((command) => command.name === slashCommand);
+	const slashLabel = selectedSlashCommand ? slashPresentation(selectedSlashCommand, t).label : slashCommand;
 
 	const at = useAtCompletion({
 		cwd,
@@ -343,7 +369,12 @@ export function Composer({ centered = false }: { centered?: boolean }) {
 					onPreview={setPreviewImage}
 					onRemove={(index) => setImages((prev) => prev.filter((_, i) => i !== index))}
 				/>
-				<div className="rounded-[20px] border-[0.5px] border-border bg-surface shadow-soft">
+				{/* biome-ignore lint/a11y/noStaticElementInteractions: 点留白 = 聚焦正文（与直接点 textarea 等价，纯便利）；
+				    不给盒子加 role/ tabIndex，那会让读屏多出一个空的可聚焦区域 */}
+				<div
+					onMouseDown={handleComposerMouseDown}
+					className="rounded-[20px] border-[0.5px] border-border bg-surface shadow-soft"
+				>
 					{/* 引用胶囊区：独占顶部一行贴边（专为选中引用留的位置，不占正文宽度） */}
 					{quotes.length > 0 && (
 						<div className="flex flex-wrap items-center gap-1.5 px-3 pt-2">
@@ -369,7 +400,7 @@ export function Composer({ centered = false }: { centered?: boolean }) {
 						>
 							{slashCommand && (
 								<span className="mt-0.5 flex shrink-0 select-none items-center rounded-md bg-surface px-2 py-0.5 font-mono text-[12px] leading-5 text-ink-2 shadow-pop">
-									/{slashCommand}
+									{slashLabel !== slashCommand && <span className="mr-1.5">{slashLabel}</span>}/{slashCommand}
 								</span>
 							)}
 							{attachments.map((path, index) => (
@@ -377,7 +408,7 @@ export function Composer({ centered = false }: { centered?: boolean }) {
 							))}
 							<textarea
 								ref={textareaRef}
-								className={`max-h-[200px] resize-none bg-transparent text-[14px] leading-relaxed outline-none placeholder:text-ink-faint select-text ${
+								className={`max-h-[200px] resize-none bg-transparent text-[14px] leading-relaxed outline-none placeholder:text-ink-faint select-text thin-scrollbar ${
 									slashCommand || attachments.length > 0 ? "min-w-[140px] flex-1" : "w-full"
 								}`}
 								placeholder={slashCommand ? t("slash.argPlaceholder") : placeholder}
@@ -421,9 +452,6 @@ export function Composer({ centered = false }: { centered?: boolean }) {
 						<RegionHost region={UI_REGIONS.ComposerFooter} />
 						<div className={readOnly ? "pointer-events-none opacity-40" : undefined}>
 							<ModelPicker />
-						</div>
-						<div className={readOnly ? "pointer-events-none opacity-40" : undefined}>
-							<ThinkingPicker />
 						</div>
 						{isStreaming && !hasContent ? (
 							<button

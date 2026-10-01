@@ -1,6 +1,16 @@
 import { buildChatRows, deriveTurnChanges, deriveTurnTimings, isAgentWorking } from "@percho/shared";
-import { type MouseEvent, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+	type CSSProperties,
+	type MouseEvent,
+	useCallback,
+	useEffect,
+	useLayoutEffect,
+	useMemo,
+	useRef,
+	useState,
+} from "react";
 import { useT } from "../../i18n";
+import { useEdgeFade } from "../../lib/use-edge-fade";
 import { Slot } from "../../plugins/Slot";
 import { UI_SLOTS } from "../../plugins/slots";
 import { useSessionsStore } from "../../stores/sessions";
@@ -53,6 +63,10 @@ export function MessageList() {
 
 	const scrollRef = useRef<HTMLDivElement>(null);
 	const contentRef = useRef<HTMLDivElement>(null);
+	// 对话正文的边界淡出：**只淡上沿**（在顶栏下渐隐）——
+	// 下沿紧贴输入框，那里不要淡出（用户明确不要）；28px < 内容区 pt-8（32px），
+	// 所以静止在顶时只会淡到空白内边距，不会咬正文
+	useEdgeFade(scrollRef, "top");
 	/** 跟随状态的 ref 镜像：ResizeObserver / scroll 回调里读最新值 */
 	const followingRef = useRef(true);
 	const [following, setFollowing] = useState(true);
@@ -296,7 +310,8 @@ export function MessageList() {
 				ref={scrollRef}
 				onScroll={handleScroll}
 				onClickCapture={handleSummaryToggle}
-				className="chat-scrollbar relative z-10 h-full overflow-x-hidden overflow-y-auto [overflow-anchor:auto] [scrollbar-gutter:stable]"
+				style={{ "--edge-fade-size": "28px" } as CSSProperties}
+				className="edge-fade chat-scrollbar relative z-10 h-full overflow-x-hidden overflow-y-auto [overflow-anchor:auto] [scrollbar-gutter:stable]"
 			>
 				<div ref={contentRef} className="mx-auto flex max-w-[760px] flex-col gap-6 px-6 pt-8 pb-16">
 					{items}

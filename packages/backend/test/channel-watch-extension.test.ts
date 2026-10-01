@@ -89,6 +89,9 @@ async function wire(opts: {
 	onSubscriptionsChanged?: ChannelWatchOptions["onSubscriptionsChanged"];
 	readFileHash?: ChannelWatchOptions["readFileHash"];
 	watcherFactory?: ChannelWatchOptions["watcherFactory"];
+	waitForHistoryReady?: ChannelWatchOptions["waitForHistoryReady"];
+	isSessionAlive?: ChannelWatchOptions["isSessionAlive"];
+	onSessionCleanup?: ChannelWatchOptions["onSessionCleanup"];
 }) {
 	const pi = makeFakePi();
 	const ext = makeChannelWatchExtension({
@@ -99,6 +102,9 @@ async function wire(opts: {
 		onSubscriptionsChanged: opts.onSubscriptionsChanged,
 		readFileHash: opts.readFileHash,
 		watcherFactory: opts.watcherFactory,
+		waitForHistoryReady: opts.waitForHistoryReady,
+		isSessionAlive: opts.isSessionAlive,
+		onSessionCleanup: opts.onSessionCleanup,
 	});
 	(ext as { factory: (pi: unknown) => void }).factory(pi);
 	const ctx = makeFakeCtx(opts.entries ?? [], opts.trusted ?? true);
@@ -726,6 +732,100 @@ describe("P1 · 首次订阅基线与 watcher 就绪竞态", () => {
 });
 
 describe("P1 · 恢复补投（catch-up）", () => {
+	it("打开时先等历史 ACK：不启动 watcher、不推进 cursor；放行后补投恰好一次", async () => {
+		const cwd = join(testRoot, "history-barrier");
+		await mkdir(topicDir(cwd, "t1"), { recursive: true });
+		await writeFile(messagesFile(cwd, "t1"), "v2\n");
+		let release = () => {};
+		const ready = new Promise<boolean>((resolve) => {
+			release = () => resolve(true);
+		});
+		const { pi } = await wire({
+			cwd,
+			entries: subsEntries(["t1"], { t1: "stale-hash" }),
+			waitForHistoryReady: () => ready,
+		});
+		expect(pi.wakes).toHaveLength(0);
+		expect(pi.appended).toHaveLength(0);
+		// SDK session_start 已返回：此处模拟 renderer 完成历史回放后 ACK。
+		release();
+		await vi.waitFor(() => expect(pi.wakes).toHaveLength(1));
+		expect(lastPayload(pi).cursors).toEqual({ t1: contentHash("v2\n") });
+		await pi.emit({ type: "session_shutdown" }, makeFakeCtx());
+	});
+
+	it("backend dispose 时显式清理已启动 watcher，不依赖 SDK session_shutdown", async () => {
+		const cwd = join(testRoot, "history-watcher-dispose");
+		await mkdir(topicDir(cwd, "t1"), { recursive: true });
+		await writeFile(messagesFile(cwd, "t1"), "v1\n");
+		let alive = false;
+		let release = () => {};
+		let cleanup = () => {};
+		const ready = new Promise<boolean>((resolve) => {
+			release = () => resolve(true);
+		});
+		const { pi } = await wire({
+			cwd,
+			entries: subsEntries(["t1"], { t1: contentHash("v1\n") }),
+			waitForHistoryReady: () => ready,
+			isSessionAlive: () => alive,
+			onSessionCleanup: (fn) => {
+				cleanup = fn;
+			},
+		});
+		alive = true; // backend 注册完成，renderer 历史回放后才 ACK
+		release();
+		await sleep(80);
+		expect(pi.wakes).toHaveLength(0);
+		alive = false;
+		cleanup(); // SDK dispose 本身不发 session_shutdown
+		await appendFile(messagesFile(cwd, "t1"), "v2\n");
+		await sleep(100);
+		expect(pi.wakes).toHaveLength(0);
+	});
+
+	it("backend dispose 未触发 shutdown 时，取消屏障也不允许孤儿 watcher", async () => {
+		const cwd = join(testRoot, "history-barrier-dispose");
+		await mkdir(topicDir(cwd, "t1"), { recursive: true });
+		await writeFile(messagesFile(cwd, "t1"), "v2\n");
+		let cancel = () => {};
+		const ready = new Promise<boolean>((resolve) => {
+			cancel = () => resolve(false);
+		});
+		const { pi } = await wire({
+			cwd,
+			entries: subsEntries(["t1"], { t1: "stale-hash" }),
+			waitForHistoryReady: () => ready,
+		});
+		cancel();
+		await sleep(20);
+		expect(pi.wakes).toHaveLength(0);
+		expect(pi.appended).toHaveLength(0);
+		await pi.emit({ type: "session_shutdown" }, makeFakeCtx());
+	});
+
+	it("历史 ACK 前关闭：不丢 cursor、不投递；再次打开仍能补投", async () => {
+		const cwd = join(testRoot, "history-barrier-close");
+		await mkdir(topicDir(cwd, "t1"), { recursive: true });
+		await writeFile(messagesFile(cwd, "t1"), "v2\n");
+		let release = () => {};
+		const ready = new Promise<boolean>((resolve) => {
+			release = () => resolve(true);
+		});
+		const { pi } = await wire({
+			cwd,
+			entries: subsEntries(["t1"], { t1: "stale-hash" }),
+			waitForHistoryReady: () => ready,
+		});
+		await pi.emit({ type: "session_shutdown" }, makeFakeCtx());
+		release();
+		await sleep(20);
+		expect(pi.wakes).toHaveLength(0);
+		expect(pi.appended).toHaveLength(0);
+		const reopened = await wireCur({ cwd, entries: subsEntries(["t1"], { t1: "stale-hash" }) });
+		await vi.waitFor(() => expect(reopened.pi.wakes).toHaveLength(1));
+		await reopened.pi.emit({ type: "session_shutdown" }, makeFakeCtx());
+	});
 	it("cursor 与当前内容不同 → 补投一条；用推进后的快照再恢复 → 0 条", async () => {
 		const cwd = join(testRoot, "catchup-once");
 		await mkdir(topicDir(cwd, "t1"), { recursive: true });

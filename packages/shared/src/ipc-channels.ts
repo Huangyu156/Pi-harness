@@ -107,6 +107,8 @@ export const SESSION_CHANNELS = {
 	setThinkingLevel: ch("session:setThinkingLevel")<{ sessionId: string; level: string }, void>(),
 	/** 读取会话历史消息（打开历史会话时回放） */
 	getSessionMessages: ch("session:getMessages")<{ sessionId: string }, SessionMessage[]>(),
+	/** 首份完整历史已落到 renderer；解除启动期频道唤醒屏障 */
+	markSessionHistoryReady: ch("session:historyReady")<{ sessionId: string }, void>(),
 	/** 读取会话当前 todo 列表（无则空数组） */
 	getTodos: ch("session:getTodos")<{ sessionId: string }, TodoItem[]>(),
 	compact: ch("session:compact")<{ sessionId: string; customInstructions?: string }, void>(),
@@ -309,8 +311,6 @@ export const APP_CHANNELS = {
 	getAppInfo: ch("app:getInfo")<void, AppInfo>(),
 	/** 日常空间工作台目录（懒创建后返回；日常会话的固定 cwd） */
 	getDailyDir: ch("app:getDailyDir")<void, string>(),
-	/** 读取持久化的顶栏 tabs（无数据返回 null） */
-	/** 持久化顶栏 tabs（主进程写 userData/tabs.json） */
 	/** 读取持久化 UI 状态（上次使用的模型/思考级别/主题/背景；无数据返回 null） */
 	loadUiState: ch("uiState:load")<void, UiState | null>(),
 	/** 持久化 UI 状态（主进程合并写入 userData/ui-state.json，传补丁即可） */

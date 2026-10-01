@@ -86,12 +86,17 @@ export type UIMessage =
 			timestamp: number;
 	  };
 
-/** 上下文压缩系统消息状态（compaction_start → compaction_end 更新同一条） */
+/** 压缩触发原因（实时事件携带） */
+export type CompactionReason = "manual" | "threshold" | "overflow";
+
+/** 上下文压缩系统消息状态（实时：compaction_start → compaction_end 更新同一条；重开会话：从会话树 compaction entry 回放） */
 export interface CompactionUiState {
 	status: "running" | "done" | "cancelled" | "error";
-	reason: "manual" | "threshold" | "overflow";
+	/** 实时事件必带；**历史回放没有**（磁盘 compaction entry 不存原因）—— 缺省时分割线不显示原因 */
+	reason?: CompactionReason;
 	summary?: string;
 	tokensBefore?: number;
+	/** 压缩后 token 估值：实时事件给；历史回放没有（不落盘）→ 只能显示「压缩前 x」 */
 	tokensAfter?: number;
 	errorMessage?: string;
 }

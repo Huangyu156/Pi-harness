@@ -27,6 +27,7 @@ export {
 export { deriveTurnTimings, type TurnTiming } from "./turn-timings";
 export {
 	type ActivityEntry,
+	type CompactionReason,
 	type CompactionUiState,
 	emptyTranscript,
 	type RetryInfo,

@@ -24,14 +24,18 @@ export const zh = {
 		untitled: "新会话",
 		settings: "设置",
 		close: "关闭会话（不删除）",
-		unpinFromBar: "取消置顶并从顶栏移除",
+		removeFromWorkspace: "从工作区移出（不关闭会话）",
 		rename: "重命名",
 		renamePlaceholder: "会话名称",
 		pin: "置顶",
 		unpin: "取消置顶",
 		sessionList: "会话列表",
-		// 顶栏 v8 起只显示置顶会话：空态提示（否则用户会以为顶栏坏了）
-		pinnedOnlyHint: "置顶的会话会显示在这里（左栏会话上右键可置顶）",
+		/** 顶栏 × （v12 起 = 从临时工作区移出，不是关会话、也不是取消置顶） */
+	},
+	/** 左侧会话轨道（设置 → 外观；默认关） */
+	rail: {
+		/** nav 的无障碍名：一条就说明白怎么用（只能靠键盘逐条移出时尤其重要） */
+		ariaLabel: "会话轨道：上下方向键在条目间移动，Delete 或 Backspace 将当前条目移出工作区（不关闭会话）",
 	},
 	floatingList: {
 		title: "会话",
@@ -70,7 +74,7 @@ export const zh = {
 		modelSearchEmpty: "没有匹配的模型",
 		modelSearchClear: "清空搜索",
 		modelSwitch: "切换模型",
-		thinkingSwitch: "切换思考深度",
+		thinkingDepth: "思考深度",
 		addImage: "添加图片",
 		imageUnsupported: "当前模型不支持图片输入，请移除图片或切换多模态模型",
 		removeImage: "移除图片",
@@ -97,6 +101,12 @@ export const zh = {
 	slash: {
 		noMatch: "没有匹配的命令",
 		argPlaceholder: "输入参数…",
+		builtin: {
+			compact: { label: "压缩", description: "压缩会话上下文", argumentHint: "[关注重点]" },
+			name: { label: "重命名", description: "设置会话名称", argumentHint: "<名称>" },
+			export: { label: "导出", description: "导出会话（.html/.jsonl）", argumentHint: "[路径]" },
+			settings: { label: "设置", description: "打开设置" },
+		},
 		group: {
 			builtin: "内置命令",
 			template: "模板",
@@ -104,7 +114,6 @@ export const zh = {
 			extension: "扩展",
 		},
 		feedback: {
-			compacted: "已开始压缩上下文",
 			renamed: "会话已改名：{name}",
 			noName: "用法：/name <名字>",
 			exported: "已导出：{path}",
@@ -129,6 +138,8 @@ export const zh = {
 		done: "已压缩上下文",
 		cancelled: "已取消压缩",
 		failed: "压缩失败：{error}",
+		/** 历史回放专用：磁盘 compaction entry 不存压缩后估值，只能给「压缩前 x」 */
+		tokensBefore: "压缩前 {tokens}",
 		summary: "摘要",
 		reason: {
 			manual: "手动",
@@ -181,9 +192,9 @@ export const zh = {
 		scrollToBottom: "回到底部",
 		thinking: "思考过程",
 		thinkingPreview: "思考中",
-		working: "Working",
-		thinkingLabel: "Thinking",
-		worked: "Worked",
+		working: "工作中",
+		thinkingLabel: "思考中",
+		worked: "已完成",
 		summaryRead: "读取 {n} 个文件",
 		summaryEdit: "编辑 {n} 个文件",
 		summaryExplore: "探索 {n} 次",
@@ -235,6 +246,25 @@ export const zh = {
 	},
 	tool: {
 		running: "运行中…",
+		names: {
+			read: "读取",
+			edit: "编辑",
+			write: "写入",
+			bash: "执行命令",
+			ls: "列出文件",
+			glob: "查找文件",
+			grep: "搜索内容",
+			webfetch: "读取网页",
+			show_image: "展示图片",
+			todo: "更新任务清单",
+			subagent: "子代理",
+			mcp: "调用 MCP 工具",
+			mcpScript: "运行 MCP 脚本",
+			channel_subscribe: "订阅频道",
+			channel_unsubscribe: "退订频道",
+			channel_post: "发送频道消息",
+			channel_list: "列出频道",
+		},
 	},
 	todo: {
 		title: "任务清单",
@@ -270,6 +300,8 @@ export const zh = {
 		removeProjectDescEmpty: "该项目下暂无会话；你电脑上的项目文件不受影响。",
 		searchEmpty: "没有匹配的会话",
 		noSessions: "暂无会话",
+		/** 每组末尾「显示更多」按钮（每次多显示 16 条） */
+		showMore: "显示更多",
 	},
 	projects: {
 		daily: "日常",
@@ -323,7 +355,10 @@ export const zh = {
 			"会话订阅频道后自动监听 .local/agent-work/channel/<主题>/ 的文件更新，另一会话写入时唤醒本会话查收（按 HANDOFF.md 沟通协议）。订阅经 appendEntry 持久化，重开会话自动恢复；内置防环保护。默认开启，对已信任项目完全生效。",
 		topBar: "顶栏显示会话",
 		topBarHint:
-			"顶栏常驻（窗口拖动、左栏开合、本轮改动都在这里）；关掉后顶栏不再显示置顶的会话胶囊，会话都在左侧栏。",
+			"顶栏常驻（窗口拖动、左栏开合、本轮改动都在这里）；关掉后顶栏不再显示临时会话工作区胶囊，会话都在左侧栏。",
+		sessionRail: "左侧会话轨道",
+		sessionRailHint:
+			"聊天区左缘的一列短线（默认关）：悬停/聚焦展开成胶囊，可见会话标题与状态。顶栏与它看的是同一份临时工作区，两处都关掉会清空工作区（正在跑的任务不受影响，只是不再记录）。",
 		centerOrb: "居中放大状态动画",
 		centerOrbHint:
 			"任务运行时在对话区域中央显示放大的状态动画（盖在文字之上，半透明遮罩压暗身后文字——工作时专心看动画即可）。只控制中央动画，Working/Thinking 状态行前的小动画始终显示。",

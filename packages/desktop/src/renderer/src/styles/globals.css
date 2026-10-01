@@ -86,6 +86,14 @@
 	--shadow-dialog: 0 12px 40px rgba(0, 0, 0, 0.18);
 	--scrollbar-thumb: #d4d4d4;
 	--scrollbar-thumb-hover: #bfbfbf;
+	/* 思考深度横条（设计稿 .local/design/ux/model-thinking-picker）：蓝紫渐变 + 白滑块 + 白刻度，
+	   深浅各一份。填充铺满整条轨道、靠 clip-path 裁出宽度（见 .think-fill）：
+	   直接改 width 会把 linear-gradient 一起拉伸，同一档位在不同档位下颜色会变。 */
+	--bar-grad: linear-gradient(96deg, #4c6ef5 0%, #7c3aed 52%, #a855f7 100%);
+	--bar-knob: #ffffff;
+	--bar-tick-on: rgba(255, 255, 255, 0.55);
+	/* 淡出分隔线中段的颜色（见 .fade-rule）：两端渐隐会掉一档视觉强度，所以比 border 稍实 */
+	--color-rule: #d8dce3;
 }
 
 [data-theme="dark"] {
@@ -104,6 +112,11 @@
 	--color-on-ink: #17171a;
 	--color-accent: #8b5cf6;
 	--color-on-accent: #ffffff;
+	/* 思考深度横条深色一套（比浅色更亮），其余见 :root 处注释 */
+	--bar-grad: linear-gradient(96deg, #5b7cfa 0%, #8b5cf6 52%, #b06bfb 100%);
+	--bar-knob: #ffffff;
+	--bar-tick-on: rgba(255, 255, 255, 0.55);
+	--color-rule: #34343c;
 	/* 首页字标手稿构造版深色：描边与构造线压到 canvas 上刚好可辨的灰 */
 	--lg-ol: #5f5f66;
 	--lg-c1: #35353c;
@@ -415,6 +428,174 @@
 	}
 }
 
+/* 左侧会话轨道（设置 → 外观开关「左侧会话轨道」，默认关）：与顶栏同一份**临时会话工作区**，
+   顺序就是工作区顺序。点击按需打开未加载的成员，× = 从工作区移出（不关会话，与顶栏同语义）。
+   以下动画细节沿用 v10 定稿（来自 git bcd3e04^）。
+
+   轨道挂在聊天列左缘（App.tsx：main + DockSlot 的父容器），定位基准是 tab bar 以下的整列，
+   输入框高度变化不压缩它的居中参考系。收起态是纯覆盖层（pointer-events-none），不挤压聊天布局。
+
+   —— v10 定稿的设计说明：聊天页左侧垂直居中一列**直角细线**（codex 风），
+   悬停/聚焦时原地「变形」为悬浮胶囊，上下邻居按行距分级跟涨成**半大/迷你胶囊**（dock 波浪：
+   展开 208×32 → ±1 胶囊 104×24（内容可见、标题裁断） → ±2 迷你空胶囊 44×14 → 细线），
+   状态类 is-expanded/is-near-1/is-near-2 由 JS 按行距下发（比 :has 链易控：呼吸/内容显隐按距离精确开关）。
+   **行高同步分级撑开（16 → 40/32/20 = 胶囊 + 留白）**：按钮在文档流内，行一撑上下邻居自然让位，
+   胶囊各行其道互不叠压；行高与胶囊同时长同曲线伸缩，任何时刻胶囊都不会超出行。
+   变形是两阶段时序（transition 取「目标态」的定义，正反向可分别配时序）：
+   展开/跟涨 = 先在小尺寸上 90ms 翻色/翻圆角（深色线 → 白胶囊），再回弹放大（340/300/280ms 随档位递减）；
+   收起 = 先 260ms 收缩（仍是白胶囊），颜色/圆角延迟 150ms 到接近尾声才变回细线。
+   避免旧版「深色线拉长到一半才闪白」的颜色逆变闪烁。 */
+/* 行高波浪：transition 同样取目标态定义（收起走基线 260ms） */
+.session-rail-item {
+	transition: height 260ms cubic-bezier(0.34, 1.15, 0.64, 1);
+}
+.session-rail-item.is-expanded {
+	height: 40px;
+	transition: height 340ms cubic-bezier(0.34, 1.25, 0.64, 1);
+}
+.session-rail-item.is-near-1 {
+	height: 32px;
+	transition: height 300ms cubic-bezier(0.34, 1.25, 0.64, 1);
+}
+.session-rail-item.is-near-2 {
+	height: 20px;
+	transition: height 280ms cubic-bezier(0.34, 1.25, 0.64, 1);
+}
+.session-rail-item .rail-capsule {
+	position: absolute;
+	left: 6px;
+	top: 50%;
+	display: flex;
+	align-items: center;
+	/* 无 padding：否则 border-box 下收起态高度被 padding 撑成 12px，就不是一条线了。
+	   内距在内容包裹层（JSX 的 px-2.5），收起时随内容一起被 overflow 裁掉 */
+	border-radius: 0;
+	overflow: hidden;
+	transform: translateY(-50%);
+	/* 收起（目标态 = 细线）：尺寸先走，颜色/圆角延迟到收缩近尾声再翻 */
+	transition:
+		width 260ms cubic-bezier(0.34, 1.15, 0.64, 1),
+		height 260ms cubic-bezier(0.34, 1.15, 0.64, 1),
+		background-color 80ms ease 150ms,
+		border-radius 80ms ease 150ms,
+		box-shadow 120ms ease;
+}
+/* 波浪档位 z 序：展开浮最上，±1 压 ±2 压细线（胶囊比行距大，会覆盖邻行） */
+.session-rail-item.is-expanded {
+	z-index: 10;
+}
+.session-rail-item.is-near-1 {
+	z-index: 6;
+}
+.session-rail-item.is-near-2 {
+	z-index: 4;
+}
+.session-rail-item.is-expanded .rail-capsule {
+	/* 与顶栏胶囊**同宽同圆角**（w-52 + rounded-full，两处是同一个对象，不许飘开）；窄窗口按视口收缩，不越过右缘 */
+	width: min(208px, calc(100vw - 40px));
+	height: 32px;
+	border-radius: 9999px;
+	background-color: var(--color-surface);
+	box-shadow: var(--shadow-pop);
+	/* 展开（目标态 = 胶囊）：颜色/圆角 90ms 先行（趁尺寸还小），尺寸随后 340ms 回弹放大，阴影最后到 */
+	transition:
+		width 340ms cubic-bezier(0.34, 1.25, 0.64, 1),
+		height 340ms cubic-bezier(0.34, 1.25, 0.64, 1),
+		background-color 90ms ease,
+		border-radius 90ms ease,
+		box-shadow 220ms ease 80ms;
+}
+/* ±1：一半大的胶囊（104×24），头像+标题可见（裁断出预览感），柔阴影 */
+.session-rail-item.is-near-1 .rail-capsule {
+	width: 104px;
+	height: 24px;
+	border-radius: 9999px;
+	background-color: var(--color-surface);
+	box-shadow: var(--shadow-soft);
+	transition:
+		width 300ms cubic-bezier(0.34, 1.25, 0.64, 1),
+		height 300ms cubic-bezier(0.34, 1.25, 0.64, 1),
+		background-color 90ms ease 20ms,
+		border-radius 90ms ease 20ms,
+		box-shadow 180ms ease 60ms;
+}
+/* ±2：迷你空胶囊（44×14），纯波形过渡元素，不显示内容 */
+.session-rail-item.is-near-2 .rail-capsule {
+	width: 44px;
+	height: 14px;
+	border-radius: 9999px;
+	background-color: var(--color-surface);
+	box-shadow: var(--shadow-soft);
+	transition:
+		width 280ms cubic-bezier(0.34, 1.25, 0.64, 1),
+		height 280ms cubic-bezier(0.34, 1.25, 0.64, 1),
+		background-color 90ms ease 20ms,
+		border-radius 90ms ease 20ms,
+		box-shadow 150ms ease 50ms;
+}
+/* 胶囊内容（图标 + 标题）：展开/±1 时等翻色完成后渐入，配合裁剪逐步揭示；
+   收起/进 ±2 时 120ms 淡出（快于收缩），不留空胶囊 */
+.session-rail-item .rail-capsule > * {
+	opacity: 0;
+	transition: opacity 120ms ease;
+}
+.session-rail-item.is-expanded .rail-capsule > * {
+	opacity: 1;
+	transition: opacity 180ms ease 110ms;
+}
+.session-rail-item.is-near-1 .rail-capsule > * {
+	opacity: 1;
+	transition: opacity 160ms ease 70ms;
+}
+/* 胶囊末尾的关闭 ×：仅展开态可见可点（同顶栏 group-hover 语义；±1/±2 只是波浪预览不给操作），
+   点击 stopPropagation 不触发切换；closeSession 后顶栏/轨道同读 sessions 数组，天然双向同步。
+   宽度 0→16 与胶囊同曲线「长出来」（margin-left 负值抵消 gap），±1 预览标题不被挤占 */
+.session-rail-item .rail-close {
+	width: 0;
+	margin-left: -8px;
+	opacity: 0;
+	pointer-events: none;
+	transition:
+		width 260ms cubic-bezier(0.34, 1.15, 0.64, 1),
+		margin-left 260ms cubic-bezier(0.34, 1.15, 0.64, 1),
+		opacity 100ms ease;
+}
+.session-rail-item.is-expanded .rail-close {
+	width: 16px;
+	margin-left: 0;
+	opacity: 1;
+	pointer-events: auto;
+	transition:
+		width 340ms cubic-bezier(0.34, 1.25, 0.64, 1),
+		margin-left 340ms cubic-bezier(0.34, 1.25, 0.64, 1),
+		opacity 180ms ease 110ms;
+}
+/* 呼吸只作用于收起态的细线；展开/跟涨成白胶囊后由内部头像的 tab-avatar-working 承担（整个白胶囊闪透明度会像故障） */
+.session-rail-item:not(.is-expanded):not(.is-near-1):not(.is-near-2) .rail-working {
+	animation: avatar-breathe 3.2s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+	/* 各档位 transition 定义在更高优先级的状态选择器里，必须逐档同优先级覆盖才压得住 */
+	.session-rail-item,
+	.session-rail-item.is-expanded,
+	.session-rail-item.is-near-1,
+	.session-rail-item.is-near-2,
+	.session-rail-item .rail-capsule,
+	.session-rail-item.is-expanded .rail-capsule,
+	.session-rail-item.is-near-1 .rail-capsule,
+	.session-rail-item.is-near-2 .rail-capsule,
+	.session-rail-item .rail-capsule > *,
+	.session-rail-item.is-expanded .rail-capsule > *,
+	.session-rail-item.is-near-1 .rail-capsule > *,
+	.session-rail-item .rail-close,
+	.session-rail-item.is-expanded .rail-close {
+		transition: none;
+	}
+	.session-rail-item:not(.is-expanded):not(.is-near-1):not(.is-near-2) .rail-working {
+		animation: none;
+	}
+}
+
 html,
 body,
 #root {
@@ -507,12 +688,161 @@ code {
 }
 
 /* 对话消息流比全局滚动条更轻，避免右侧视觉重量抢过内容。
-   Electron 的 Chromium 只走 WebKit 伪元素；不设 scrollbar-width，避免触发系统轨道绘制。 */
-.chat-scrollbar::-webkit-scrollbar {
+   Electron 的 Chromium 只走 WebKit 伪元素；不设 scrollbar-width，避免触发系统轨道绘制。
+   共用类 .thin-scrollbar（弹层列表等也用），.chat-scrollbar 保留为别名（既有调用点不改）。 */
+.chat-scrollbar::-webkit-scrollbar,
+.thin-scrollbar::-webkit-scrollbar {
 	width: 4px;
 }
-.chat-scrollbar::-webkit-scrollbar-thumb {
+.chat-scrollbar::-webkit-scrollbar-thumb,
+.thin-scrollbar::-webkit-scrollbar-thumb {
 	border-radius: 3px;
+}
+
+/* 淡出分隔线：1px 高的发丝线，中段留雾感、两端各 22% 渐隐到透明（没有明确的线头）。
+   用在中弹层的搜索行下 / 列表下（替代实线 border）。 */
+.fade-rule {
+	height: 1px;
+	background: linear-gradient(
+		90deg,
+		transparent 0%,
+		var(--color-rule) 22%,
+		var(--color-rule) 78%,
+		transparent 100%
+	);
+}
+
+/* 滚动边界淡出：把边界的硬裁切换成渐变（顶栏下 = 对话正文上沿、左栏底部 = 会话列表下沿，
+   也就是原来那两条 1px 实线的位置）。两侧各自只在「那个方向还有内容」时淡出，属性由
+   lib/use-edge-fade.ts 按滚动位置写；不溢出的容器不挂属性，边缘保持干净。
+   用 alpha 逆罩而不是盖一层颜色：不引入任何色值（#000 在这里只是遮罩的「不透明」取值），
+   深浅主题共用一套，行自身的 hover 底色也跟着自然淡出。淡出高度旋钮 = --edge-fade-size。 */
+.edge-fade[data-fade-top="true"] {
+	mask-image: linear-gradient(to bottom, transparent 0, #000 var(--edge-fade-size, 20px));
+}
+.edge-fade[data-fade-bottom="true"] {
+	mask-image: linear-gradient(to top, transparent 0, #000 var(--edge-fade-size, 20px));
+}
+.edge-fade[data-fade-top="true"][data-fade-bottom="true"] {
+	mask-image: linear-gradient(
+		to bottom,
+		transparent 0,
+		#000 var(--edge-fade-size, 20px),
+		#000 calc(100% - var(--edge-fade-size, 20px)),
+		transparent 100%
+	);
+}
+
+/* 思考深度横条（模型弹层底部）：轨道 + 渐变填充 + 刻度 + 原生 range 滑块。
+   三者共用一条中心线公式：刻度中心 x = 填充宽 = 滑块中心 = calc((100% - 26px) * pos + 13px)。
+   26px = 轨道高度 = 滑块直径：滑块走到两端时左右各占半个滑块，刻度跟着内缩才不会顶出条外/被滑块盖偏。
+   用原生 input[type=range] 叠在渐变与刻度之上：←→ / Home / End / 可聚焦 / 无障碍语义都是白拿的；
+   但可见的滑块是自绘的（原生 thumb 透明化）——原生 thumb 没法加位移动画。 */
+.think-slider {
+	/* 换档位动画：280ms + 轻微回弹（app 里展开类动画用的是同族缓动）。
+	   滑块和填充（clip-path 裁出来的边界）用同一条曲线：回弹幅度小于滑块半径，
+	   所以填充边界的过冲始终藏在滑块下面、看不出脱节 —— 千万别只给滑块加回弹。
+	   时长偏长是有意的：太快（<200ms）在 47px 的小位移上几乎看不出动过。 */
+	--bar-anim: 280ms cubic-bezier(0.34, 1.12, 0.64, 1);
+	position: relative;
+	height: 26px;
+}
+.think-track {
+	position: absolute;
+	inset: 0;
+	border-radius: 9999px;
+	background: var(--color-hover);
+}
+.think-fill {
+	position: absolute;
+	inset: 0;
+	border-radius: 9999px;
+	background: var(--bar-grad);
+	clip-path: inset(0 calc(100% - var(--fillw, 13px)) 0 0);
+	transition: clip-path var(--bar-anim);
+}
+.think-tick {
+	position: absolute;
+	top: 50%;
+	width: 5px;
+	height: 5px;
+	border-radius: 50%;
+	transform: translate(-50%, -50%);
+	background: var(--color-border-strong);
+	transition: background-color var(--bar-anim);
+}
+.think-tick[data-passed="true"] {
+	background: var(--bar-tick-on);
+}
+.think-range {
+	position: absolute;
+	inset: 0;
+	width: 100%;
+	height: 26px;
+	margin: 0;
+	appearance: none;
+	background: transparent;
+	cursor: pointer;
+}
+.think-range::-webkit-slider-runnable-track {
+	height: 26px;
+	background: transparent;
+}
+/* 原生 thumb 只留 26px 拖拽热区、视觉全透明：换档位的位移动画做在自绘滑块 .think-knob 上
+   （原生 thumb 的位置由引擎直接给定，没法 transition） */
+.think-range::-webkit-slider-thumb {
+	appearance: none;
+	width: 26px;
+	height: 26px;
+	border-radius: 50%;
+	border: none;
+	background: transparent;
+	box-shadow: none;
+}
+/* 自绘滑块：rail 从轨道左端缩进 13px（= 半径）、宽 = 轨道宽 - 26px，整体平移 `--pos × 自身宽`；
+   knob 再反向缩进 13px 把自己摆在 rail 左端 → pos=0 时中心 = 轨道左 + 13px，
+   pos=1 时 = 轨道右 - 13px，正好压在首/末刻度上（与刻度、填充同一条中心线） */
+.think-knob-rail {
+	position: absolute;
+	left: 13px;
+	top: 0;
+	width: calc(100% - 26px);
+	height: 26px;
+	transform: translateX(calc(var(--pos, 0) * 100%));
+	transition: transform var(--bar-anim);
+	pointer-events: none;
+}
+.think-knob {
+	position: absolute;
+	left: -13px;
+	top: 0;
+	width: 26px;
+	height: 26px;
+	border-radius: 50%;
+	background: var(--bar-knob);
+	box-shadow: var(--shadow-pop);
+}
+/* 拖拽中不做动画：滑块要严格跟手（点轨道瞬时跳到位也是同一条路） */
+.think-slider[data-dragging="true"] .think-knob-rail,
+.think-slider[data-dragging="true"] .think-fill,
+.think-slider[data-dragging="true"] .think-tick {
+	transition: none;
+}
+/* 焦点环落在滑块上而不是整条轨道外框（滑条不是按钮，外框会显得很笨） */
+.think-range:focus-visible {
+	outline: none;
+}
+.think-range:focus-visible ~ .think-knob-rail .think-knob {
+	box-shadow:
+		var(--shadow-pop),
+		0 0 0 2px color-mix(in srgb, var(--color-accent) 35%, transparent);
+}
+@media (prefers-reduced-motion: reduce) {
+	.think-fill,
+	.think-tick,
+	.think-knob-rail {
+		transition: none;
+	}
 }
 
 /* Working 文字高亮扫过（codex 风格）：光带只扫文字本身，背景不变（background-clip: text）。
@@ -934,17 +1264,38 @@ code {
 /* ---- 左侧栏（Codex 式常驻导航）：push 式宽度过渡，收起 = 宽 0 彻底藏起（不留图标条）。
    内层固定 240 宽：过渡期间内容被整体推走而不是被横向挤压（否则文字会边缩边换行） ---- */
 .sidebar {
+	position: relative;
 	flex: none;
 	width: 240px;
 	overflow: hidden;
-	border-right: 1px solid var(--color-border);
 	background: var(--color-canvas);
 	transition: width 0.4s cubic-bezier(0.32, 0.72, 0, 1);
+	/* 与对话区的分界不再用 1px 实线 border：改成**中段实、两头淡出**的发丝线（同 `.fade-rule` 语言，竖直用）。
+	   border 换成伪元素后内容区宽了 1px（border-box 下原来被 border 吃掉那 1px），总宽不变。
+	   中段实线长度占比是唯一旋钮（50% = 上下各 25% 都在淡）。 */
+	--sidebar-rule-solid: 50%;
 }
-/* 收起：宽度与右边框一起归 0（只宽 0 会留下 1px 的透明边框，聊天列拿不到那 1px） */
+.sidebar::after {
+	content: "";
+	position: absolute;
+	top: 0;
+	bottom: 0;
+	right: 0;
+	width: 1px;
+	background: linear-gradient(
+		to bottom,
+		transparent 0%,
+		var(--color-rule) calc(50% - var(--sidebar-rule-solid) / 2),
+		var(--color-rule) calc(50% + var(--sidebar-rule-solid) / 2),
+		transparent 100%
+	);
+}
+/* 收起：宽度归 0，发丝线一起不画（只宽 0 会留一条 1px 的线；聊天列能不能拿到那 1px 与收起前一致） */
 .sidebar.is-collapsed {
 	width: 0;
-	border-right-width: 0;
+}
+.sidebar.is-collapsed::after {
+	display: none;
 }
 .sidebar-inner {
 	width: 240px;
@@ -960,8 +1311,8 @@ code {
 	opacity: 0;
 	transform: translateX(-28px);
 }
-/* 分组展开/收起：grid 0fr→1fr 让未知高度（空态/1–8 行/248px 限高列表）共用一套动画，
-   内层 overflow:hidden 只负责裁切；实际列表仍保留自己的纵向滚动。 */
+/* 分组展开/收起：grid 0fr→1fr 让未知高度（空态/任意行数的列表）共用一套动画，
+   内层 overflow:hidden 只负责裁切；列表自己**不滚**（整条左栏只有一个外层滚动容器，v13 统一滚动）。 */
 .sidebar-group-content {
 	display: grid;
 	grid-template-rows: 0fr;
@@ -981,27 +1332,6 @@ code {
 /* 会话行状态点：工作中 = 墨色呼吸（与顶栏胶囊头像同一套节拍与时长） */
 .sidebar-dot-working {
 	animation: avatar-breathe 3.2s ease-in-out infinite;
-}
-/* 组内会话列表的边缘淡出：上下两侧各自按「那个方向还有内容」开关（属性由组件按滚动位置写），
-   把硬裁切换成渐变。淡出高度是唯一旋钮；遮罩是 alpha 逆罩、不引入任何颜色，所以深浅色主题共用一套。
-   #000 在这里是逆罩的「不透明」取值，不是设计色值。 */
-.sidebar-session-list {
-	--session-list-fade: 12px;
-}
-.sidebar-session-list[data-fade-top="true"] {
-	mask-image: linear-gradient(to bottom, transparent 0, #000 var(--session-list-fade));
-}
-.sidebar-session-list[data-fade-bottom="true"] {
-	mask-image: linear-gradient(to top, transparent 0, #000 var(--session-list-fade));
-}
-.sidebar-session-list[data-fade-top="true"][data-fade-bottom="true"] {
-	mask-image: linear-gradient(
-		to bottom,
-		transparent 0,
-		#000 var(--session-list-fade),
-		#000 calc(100% - var(--session-list-fade)),
-		transparent 100%
-	);
 }
 @media (prefers-reduced-motion: reduce) {
 	.sidebar,

@@ -1,9 +1,4 @@
-import {
-	parseSessionEntries,
-	type SessionEntry,
-	type SessionManager,
-	type SessionMessageEntry,
-} from "@earendil-works/pi-coding-agent";
+import { parseSessionEntries, type SessionEntry, type SessionManager } from "@earendil-works/pi-coding-agent";
 import {
 	extractSubagentRuns,
 	type ImageInput,
@@ -45,6 +40,10 @@ export interface RawMessage {
 	stopReason?: string;
 	/** LLM 错误详情（stopReason==="error" 时存在） */
 	errorMessage?: string;
+	/** 压缩回放标记（合成项，role==="compaction"）：摘要正文 */
+	summary?: string;
+	/** 压缩回放标记：压缩前 token 数 */
+	tokensBefore?: number;
 }
 
 /** show_image toolResult.details → { images, paths }（兼容旧单图 { path, image } 形状；不符返回 null） */
@@ -190,16 +189,34 @@ export function readSessionMessagesFromContent(content: string): SessionMessage[
 }
 
 /**
- * 当前会话树分支 → UI 历史消息。必须读取 getBranch() 的完整持久历史，而不是
+ * 当前分支 → UI 历史消息。必须读 getBranch() 的完整持久历史，而不是
  * AgentSession.messages（后者是发给模型的上下文，compaction 后会裁掉旧消息）。
+ *
+ * compaction entry 也按分支顺序插回去：压缩分割线的位置就是 entry 在树上的位置
+ * （压缩发生时 entry 追加在当时的 leaf 之后），重开会话才能看到当时压过。
  */
 export function toBranchSessionMessages(branch: readonly SessionEntry[]): SessionMessage[] {
-	const raw = branch
-		.filter((entry): entry is SessionMessageEntry => entry.type === "message")
-		.map((entry) => entry.message);
+	// 摊平成「消息 + 压缩标记」混合流后再走 toSessionMessages：toolResult 靠 toolCallId 配对，
+	// 标记插在中间不影响回填；assignEntryIds 只认 user/assistant，自动跳过标记
+	const raw: unknown[] = [];
+	for (const entry of branch) {
+		if (entry.type === "message") raw.push(entry.message);
+		else if (entry.type === "compaction") raw.push(compactionMarker(entry));
+	}
 	const messages = toSessionMessages(raw);
 	assignEntryIds(messages, branch);
 	return messages;
+}
+
+/** compaction entry → 回放标记（entry timestamp 是 ISO 串，SessionMessage 用 ms；坏值退化成当前时刻） */
+function compactionMarker(entry: Extract<SessionEntry, { type: "compaction" }>): RawMessage {
+	const parsed = entry.timestamp ? Date.parse(entry.timestamp) : Number.NaN;
+	return {
+		role: "compaction",
+		timestamp: Number.isNaN(parsed) ? Date.now() : parsed,
+		...(entry.summary ? { summary: entry.summary } : {}),
+		...(typeof entry.tokensBefore === "number" ? { tokensBefore: entry.tokensBefore } : {}),
+	};
 }
 
 /**
@@ -210,6 +227,16 @@ export function toSessionMessages(rawMessages: readonly unknown[]): SessionMessa
 	const out: SessionMessage[] = [];
 	const toolById = new Map<string, SessionToolCall>();
 	for (const raw of rawMessages as RawMessage[]) {
+		if (raw.role === "compaction") {
+			// 历史回放的压缩分割线（实时路径由 compaction_start/end 事件产生）
+			out.push({
+				role: "compaction",
+				timestamp: raw.timestamp ?? Date.now(),
+				...(raw.summary ? { summary: raw.summary } : {}),
+				...(typeof raw.tokensBefore === "number" ? { tokensBefore: raw.tokensBefore } : {}),
+			});
+			continue;
+		}
 		if (raw.role === "user") {
 			const sourceText = blockText(raw.content);
 			const invocation = parseExpandedSkillInvocation(sourceText);

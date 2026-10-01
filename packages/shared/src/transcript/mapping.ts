@@ -26,6 +26,23 @@ export function messagesToUIMessages(messages: SessionMessage[]): UIMessage[] {
 		const m = messages[i];
 		if (!m) continue;
 		const id = `h${i}`;
+		if (m.role === "compaction") {
+			// 重开会话回放的压缩分割线（实时路径由 compaction_start/end 事件产生）。
+			// 不 flushError：与实时同序 —— 溢出恢复的压缩发生在 pending 错误卡落卡之前，
+			// 分割线先出现、错误卡随后落（与 reducer 的 agent_end 落卡时机一致）
+			ui.push({
+				kind: "system",
+				id,
+				text: "",
+				timestamp: m.timestamp,
+				compact: {
+					status: "done",
+					...(m.summary ? { summary: m.summary } : {}),
+					...(typeof m.tokensBefore === "number" ? { tokensBefore: m.tokensBefore } : {}),
+				},
+			});
+			continue;
+		}
 		if (m.role === "image") {
 			flushError();
 			ui.push({ kind: "image", id, images: m.images, paths: m.paths, timestamp: m.timestamp });

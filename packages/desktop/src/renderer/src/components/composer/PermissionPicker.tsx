@@ -48,7 +48,7 @@ export function PermissionPicker() {
 	const chip = (
 		<button
 			type="button"
-			className={`flex items-center gap-1 rounded-lg px-2 py-1 text-xs transition-colors hover:bg-hover ${
+			className={`flex items-center gap-1 rounded-full px-2.5 py-1 text-xs transition-colors hover:bg-hover ${
 				mode === "fullAccess" ? "text-warn hover:text-warn" : "text-ink-dim hover:text-ink"
 			} ${gateOff ? "cursor-not-allowed opacity-40 hover:bg-transparent" : ""}`}
 			aria-label={t("composer.permissionMode")}
@@ -72,7 +72,10 @@ export function PermissionPicker() {
 				chip
 			)}
 			{open && !gateOff && (
-				<div className="absolute bottom-full left-0 z-30 mb-1 w-64 rounded-xl bg-surface p-1 shadow-pop">
+				<div
+					data-composer-overlay=""
+					className="absolute bottom-full left-0 z-30 mb-1 w-64 rounded-xl bg-surface p-1 shadow-pop"
+				>
 					{MODES.map((m) => {
 						const selected = mode === m;
 						return (

@@ -26,13 +26,16 @@ export const en: Messages = {
 		untitled: "New session",
 		settings: "Settings",
 		close: "Close session (keep on disk)",
-		unpinFromBar: "Unpin and remove from the top bar",
+		removeFromWorkspace: "Remove from workspace (session stays open)",
 		rename: "Rename",
 		renamePlaceholder: "Session name",
 		pin: "Pin",
 		unpin: "Unpin",
 		sessionList: "Session list",
-		pinnedOnlyHint: "Pinned sessions show up here (right-click one in the sidebar to pin)",
+	},
+	rail: {
+		ariaLabel:
+			"Session rail: use the arrow keys to move between entries; press Delete or Backspace to remove the current entry from the workspace (the session stays open)",
 	},
 	floatingList: {
 		title: "Sessions",
@@ -71,7 +74,7 @@ export const en: Messages = {
 		modelSearchEmpty: "No matching models",
 		modelSearchClear: "Clear search",
 		modelSwitch: "Switch model",
-		thinkingSwitch: "Switch thinking level",
+		thinkingDepth: "Thinking depth",
 		addImage: "Add image",
 		imageUnsupported:
 			"The current model doesn't support image input — remove the image or switch to a multimodal model",
@@ -100,6 +103,12 @@ export const en: Messages = {
 	slash: {
 		noMatch: "No matching commands",
 		argPlaceholder: "Type arguments…",
+		builtin: {
+			compact: { label: "compact", description: "Compress session context", argumentHint: "[focus]" },
+			name: { label: "name", description: "Set session display name", argumentHint: "<name>" },
+			export: { label: "export", description: "Export session (.html/.jsonl)", argumentHint: "[path]" },
+			settings: { label: "settings", description: "Open settings" },
+		},
 		group: {
 			builtin: "Built-in",
 			template: "Templates",
@@ -107,7 +116,6 @@ export const en: Messages = {
 			extension: "Extensions",
 		},
 		feedback: {
-			compacted: "Context compaction started",
 			renamed: "Session renamed: {name}",
 			noName: "Usage: /name <name>",
 			exported: "Exported: {path}",
@@ -132,6 +140,8 @@ export const en: Messages = {
 		done: "Context compacted",
 		cancelled: "Compaction cancelled",
 		failed: "Compaction failed: {error}",
+		/** Replay-only: the persisted compaction entry has no post-compaction estimate */
+		tokensBefore: "before {tokens}",
 		summary: "Summary",
 		reason: {
 			manual: "manual",
@@ -238,6 +248,25 @@ export const en: Messages = {
 	},
 	tool: {
 		running: "Running…",
+		names: {
+			read: "Read",
+			edit: "Edit",
+			write: "Write",
+			bash: "Bash",
+			ls: "Ls",
+			glob: "Glob",
+			grep: "Grep",
+			webfetch: "Webfetch",
+			show_image: "Show_image",
+			todo: "Todo",
+			subagent: "Subagent",
+			mcp: "MCP",
+			mcpScript: "MCP Script",
+			channel_subscribe: "Channel_subscribe",
+			channel_unsubscribe: "Channel_unsubscribe",
+			channel_post: "Channel_post",
+			channel_list: "Channel_list",
+		},
 	},
 	todo: {
 		title: "Todo List",
@@ -275,6 +304,8 @@ export const en: Messages = {
 			"This removes the project from Percho; it has no sessions, and the project files on your computer stay untouched.",
 		searchEmpty: "No matching sessions",
 		noSessions: "No sessions",
+		/** Per-group "show more" button at the end of the list (16 more rows each click) */
+		showMore: "Show more",
 	},
 	projects: {
 		daily: "Daily",
@@ -328,7 +359,10 @@ export const en: Messages = {
 			"After a session subscribes to a channel it watches .local/agent-work/channel/<topic>/ for file updates; writes from another session wake this session to pick them up (per the HANDOFF.md protocol). Subscriptions persist via appendEntry and restore on session reopen; built-in loop protection. On by default, fully effective for trusted projects.",
 		topBar: "Show sessions in the top bar",
 		topBarHint:
-			"The top bar is always there (window dragging, sidebar toggle, current changes). Turn this off and it simply stops showing pinned-session pills — every session stays in the left sidebar.",
+			"The top bar is always there (window dragging, sidebar toggle, current changes). Turn this off and it simply stops showing the temporary-workspace pills — every session stays in the left sidebar.",
+		sessionRail: "Left session rail",
+		sessionRailHint:
+			"A column of short lines at the left edge of the chat area (off by default): hover or focus expands one into a capsule with its title and status. The rail and the top bar show the same temporary workspace; turning both off clears it (running tasks are unaffected — they just stop being recorded).",
 		centerOrb: "Centered status animation",
 		centerOrbHint:
 			"While a task is running, shows an enlarged status animation at the center of the conversation area (above the text, with a translucent scrim dimming whatever is behind it). Only controls the centered animation — the small orb before the Working/Thinking row always stays.",

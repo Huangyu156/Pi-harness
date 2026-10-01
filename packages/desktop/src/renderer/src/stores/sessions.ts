@@ -3,9 +3,18 @@ import { messagesToUIMessages } from "@percho/shared";
 import { create } from "zustand";
 import { getPi } from "../api";
 import { errText } from "../lib/error-text";
-import { isPrimaryNavigationSession } from "../lib/session-visibility";
 import { clampThinkingLevel } from "../lib/thinking";
 import { COMPOSER_FOCUS_EVENT, useDraftStore } from "./drafts";
+import {
+	clearSessionHistory,
+	deferSessionHistory,
+	finishSessionHistory,
+	hasPendingSessionHistory,
+	historyOpenEpoch,
+	isHistoryReady,
+	retrySessionHistory,
+} from "./session-history";
+import { useSessionWorkspaceStore } from "./session-workspace";
 import { pushToast } from "./toasts";
 import { useTranscriptStore } from "./transcript";
 import { useUiPreferencesStore } from "./ui-preferences";
@@ -63,8 +72,8 @@ function makeDraft(
 }
 
 /**
- * 顶栏展示顺序：置顶分区在左（内部保持既有顺序，可拖动互换），其余按原顺序跟在后面。
- * 稳定分区而非排序：拖拽只改 tabs.json 的原始顺序，置顶区与非置顶区的相对位置由本函数表达。
+ * 置顶分区：置顶会话在前（内部保持原顺序），其余按原顺序跟在后面。
+ * **v12 起只用于左栏/项目页**（顶栏胶囊与左侧轨道看的是临时会话工作区，顺序由成员表定，不参与置顶分区）；稳定分区而非排序。
  * 未知 id（会话已被外部删除）直接忽略。
  */
 export function partitionSessionsByPin(
@@ -79,31 +88,10 @@ export function partitionSessionsByPin(
 }
 
 /**
- * 顶栏展示集（v8 定稿）：**严格 = 置顶表**——顶栏胶囊就是置顶会话（不管它的 tab 开没开）。
- * 用户：顶栏之前是「打开的会话全进去」= 唯一的会话总表，胶囊越来越多；现在左栏承担总表，
- * 顶栏只放真正需要盯的会话（新会话的导航在左栏与顶栏「＋」，见 spec D1/D3）。
- * - **不能只从 tabs 里筛**：会话被置顶、但 tab 已关（或本次启动没恢复）时，只筛 tabs 会把它藏掉，
- *   用户会看到「已置顶却不在顶栏」——所以置顶会话的 meta 从 tabs → 历史两边找，点击时自动开。
- * - 顺序 = `pinnedSessions` 自己的顺序（置顶即插队到最左，拖动排序改的也是它）。
- * - 置顶表里查不到 meta 的 id（会话已删）直接跳过，不生成空胶囊。
+ * `openFromHistory` 的结果：`ok:false` = 没开起来（已 toast）；`latest:false` = 会话确实开了，
+ * 但用户在等待期间又导航了 —— 调用方只能落数据，不得抢焦点/`activeFile`。
  */
-export function selectBarSessions(
-	tabs: readonly SessionMeta[],
-	pinnedSessions: readonly string[],
-	history: readonly SessionMeta[],
-): SessionMeta[] {
-	const byId = new Map<string, SessionMeta>();
-	for (const s of history) byId.set(s.sessionId, s);
-	// tabs 覆盖历史同名项：名称/状态以当前打开实例为准
-	for (const s of tabs) byId.set(s.sessionId, s);
-	return (
-		pinnedSessions
-			.map((id) => byId.get(id))
-			// 纵深防御：置顶表里可能残留只读子会话（旧 ui-state / 手改）——不生成只读胶囊。
-			// 与左栏同一道判据（lib/session-visibility），不要各写一份
-			.filter((s): s is SessionMeta => s !== undefined && isPrimaryNavigationSession(s))
-	);
-}
+export type OpenFromHistoryResult = { ok: false } | { ok: true; latest: boolean; meta: SessionMeta };
 
 /**
  * 进程内单调激活序号（spec D2）：**用户导航动作一开始**就领号（不能等 IPC 返回才领，否则表达不了点击顺序）。
@@ -114,6 +102,41 @@ export function selectBarSessions(
  */
 let activationSeq = 0;
 
+/**
+ * 当前导航代次（只读，不领号）：启动恢复链在**异步等待之前**取号，等待后比对 ——
+ * 变了说明用户自己导航过（切会话、点「＋」/项目行回新会话页都算），迟到的恢复必须放弃抄回焦点。
+ */
+export function currentNavigationToken(): number {
+	return activationSeq;
+}
+
+/** 该代次是否仍是最新意图（恢复链入口取号后用） */
+export function isLatestNavigation(token: number): boolean {
+	return token === activationSeq;
+}
+
+/**
+ * 用户意图序号：只回答「用户在某个自动动作（启动恢复）开始后自己开过/切过页面吗」。
+ *
+ * 为什么不能直接用 `activationSeq`：后者决定**谁抢到焦点**，而「已经在 draft 页时再点＋」按既有设计
+ * 不得作废在途 promotion 的落地（单例 draft 语义，有断言锁着）—— 但那条动作确实是用户的选择，
+ * 迟到的启动恢复不该再把页面换成快照里的旧会话。两个问题，两个序号。
+ */
+let userIntentSeq = 0;
+
+function noteUserIntent(): void {
+	userIntentSeq += 1;
+}
+
+/** 恢复链在**任何 await 之前**取号；等待结束时变了就说明用户自己动过手 */
+export function currentUserIntentToken(): number {
+	return userIntentSeq;
+}
+
+export function isLatestUserIntent(token: number): boolean {
+	return token === userIntentSeq;
+}
+
 function claimActivation(): number {
 	activationSeq += 1;
 	return activationSeq;
@@ -123,7 +146,6 @@ function claimActivation(): number {
 function isLatestActivation(token: number): boolean {
 	return token === activationSeq;
 }
-
 /** 同会话在途的 bundle 装载（key = sessionId） */
 const bundleInFlight = new Map<string, Promise<void>>();
 
@@ -138,9 +160,24 @@ const bundleInFlight = new Map<string, Promise<void>>();
 function loadSessionBundle(sessionId: string, opts?: { skipHistoryIfLive?: boolean }): Promise<void> {
 	const existing = bundleInFlight.get(sessionId);
 	if (existing) return existing;
-	const promise = loadSessionBundleInner(sessionId, opts).finally(() => {
-		if (bundleInFlight.get(sessionId) === promise) bundleInFlight.delete(sessionId);
-	});
+	const openingEpoch = historyOpenEpoch(sessionId);
+	const promise = loadSessionBundleInner(sessionId, opts)
+		.catch((error: unknown) => {
+			// 历史 IPC 失败也不能把「有一条实时消息」当作历史完成。保留可重试状态。
+			if (
+				historyOpenEpoch(sessionId) === openingEpoch &&
+				!isHistoryReady(sessionId) &&
+				useSessionsStore.getState().sessions.some((s) => s.sessionId === sessionId)
+			) {
+				deferSessionHistory(sessionId, () =>
+					useSessionsStore.getState().sessions.some((s) => s.sessionId === sessionId),
+				);
+			}
+			throw error;
+		})
+		.finally(() => {
+			if (bundleInFlight.get(sessionId) === promise) bundleInFlight.delete(sessionId);
+		});
 	bundleInFlight.set(sessionId, promise);
 	return promise;
 }
@@ -153,6 +190,8 @@ async function loadSessionBundleInner(
 	const skipHistory =
 		opts?.skipHistoryIfLive === true &&
 		useTranscriptStore.getState().bySession[sessionId]?.agentActive === true;
+	const transcriptBefore = useTranscriptStore.getState().bySession[sessionId];
+	const openingEpoch = historyOpenEpoch(sessionId);
 	const [history, followUpQueue, todos, permissionMode] = await Promise.all([
 		skipHistory ? Promise.resolve(null) : getPi().getSessionMessages({ sessionId }),
 		getPi().getFollowUpMessages({ sessionId }),
@@ -161,12 +200,29 @@ async function loadSessionBundleInner(
 	]);
 	// TOCTOU 复核：await 期间会话转为 live（如恰好有 prompt 竞态）时丢弃迟到历史，
 	// 防旧快照覆盖刚建立的流式态（queue/todo/permissionMode 是幂等快照，照常应用）
-	const liveNow = useTranscriptStore.getState().bySession[sessionId]?.agentActive === true;
+	const transcriptNow = useTranscriptStore.getState().bySession[sessionId];
+	const liveNow = transcriptNow?.agentActive === true;
+	// 不能只看 liveNow：IPC 期间恰好跑完的一轮可能已改写 transcript，旧快照仍过期。
+	// 关闭后的迟到 bundle 也绝不能重建该 session 的 UI 条目。
+	if (
+		historyOpenEpoch(sessionId) !== openingEpoch ||
+		!useSessionsStore.getState().sessions.some((s) => s.sessionId === sessionId)
+	)
+		return;
 	const t = useTranscriptStore.getState();
-	if (history && !liveNow) t.loadHistory(sessionId, messagesToUIMessages(history));
+	const historyNeedsRetry = !history || liveNow || transcriptBefore !== transcriptNow;
+	if (history && !historyNeedsRetry) {
+		t.loadHistory(sessionId, messagesToUIMessages(history));
+		finishSessionHistory(sessionId);
+	}
 	t.setFollowUpQueue(sessionId, followUpQueue);
 	t.loadTodos(sessionId, todos);
 	applyBackendPermissionMode(sessionId, permissionMode);
+	if (historyNeedsRetry) {
+		deferSessionHistory(sessionId, () =>
+			useSessionsStore.getState().sessions.some((s) => s.sessionId === sessionId),
+		);
+	}
 	// D7：本机记住过的档位盖过后端默认值（后端 mode 不落盘，重启/卸载重开后恒为 default）。
 	// 这里 await 而不是 fire-and-forget：保证「打开完就是正确档位」，验收才能确定性断言。
 	const remembered = useUiPreferencesStore.getState().sessionPermissionModes[sessionId];
@@ -384,6 +440,8 @@ let promotion: { generation: number; done: Promise<string | null> } | null = nul
  * 所以先领号：迟到结果只落 sessions、不抢焦点/cwd。
  */
 async function promoteDraft(draft: NewSessionDraftConfig): Promise<string | null> {
+	// 用户发送 = 用户意图：迟到的启动恢复不得再把页面换成快照里的旧会话
+	noteUserIntent();
 	const targetCwd = draft.cwd;
 	if (!targetCwd) return null;
 	const token = claimActivation();
@@ -395,6 +453,14 @@ async function promoteDraft(draft: NewSessionDraftConfig): Promise<string | null
 				thinkingLevel: draft.thinkingLevel,
 			},
 		});
+		// 转正成功 = 用户刚开的会话 → 记入临时工作区（锚点 = 上一刻在看的成员，落在它右侧）。
+		// 迟到（已不是最新意图）只进工作区、不抢 activeFile（与下面的焦点处理同一口径）。
+		useSessionWorkspaceStore
+			.getState()
+			.addMember(
+				{ file: meta.sessionFile, sessionId: meta.sessionId },
+				{ activate: isLatestActivation(token) },
+			);
 		useSessionsStore.setState((state) => {
 			// 同 id 已存在就不再 append（与 open pipeline 同一套防御性去重）
 			const sessions = state.sessions.some((s) => s.sessionId === meta.sessionId)
@@ -419,6 +485,8 @@ async function promoteDraft(draft: NewSessionDraftConfig): Promise<string | null
 			};
 		});
 		useTranscriptStore.getState().resetSession(meta.sessionId);
+		// 全新会话的历史底座天然为空；在首次用户消息前即确认就绪。
+		finishSessionHistory(meta.sessionId);
 		if (isLatestActivation(token)) rememberCwd(targetCwd);
 		// draft 上选过的权限档位（入口快照）：后端新会话一律 default 起步，这里补上
 		// （失败只 toast，不回滚转正）
@@ -434,7 +502,7 @@ async function promoteDraft(draft: NewSessionDraftConfig): Promise<string | null
 	}
 }
 
-/** 顶栏打开的会话持久化（重启恢复用）；由主进程写 userData/tabs.json，不依赖 renderer localStorage */
+/** 会话列表/导航/当前会话状态（**v10 起不再持久化「打开列表」**：重启只由工作区恢复链按需加载 activeFile 一条） */
 interface SessionsStore {
 	sessions: SessionMeta[];
 	activeSessionId: string | null;
@@ -479,7 +547,7 @@ interface SessionsStore {
 	closeSession: (sessionId: string, intent?: SessionCloseIntent) => Promise<{ closed: boolean }>;
 	/** 自动卸载（内存策略专用，见实现处注释）；传 intent="gc" 让后端区分自动 GC 与用户意图 */
 	unloadSession: (sessionId: string) => Promise<{ closed: boolean }>;
-	openFromHistory: (filePath: string) => Promise<void>;
+	openFromHistory: (filePath: string) => Promise<OpenFromHistoryResult>;
 	/** 在指定 assistant 消息处分叉：新会话以新 tab 打开并切换过去（原会话保留原样）；成功返回新 sessionId */
 	forkSession: (ref: { entryId?: string; text?: string }) => Promise<string | undefined>;
 	/** 撤回一条用户消息：会话回退到该消息之前，文本/图片放回输入框草稿继续编辑 */
@@ -526,6 +594,9 @@ export const useSessionsStore = create<SessionsStore>((set, get) => ({
 
 	activateNewSessionDraft: (cwd) => {
 		const state = get();
+		// 用户导航意图（供启动恢复链判「用户已经自己选过页面」）。刻意不动 activationSeq：
+		// 「已经在 draft 页时再点＋」不该作废在途的 promotion 落地（见单例 draft 的既有断言）。
+		noteUserIntent();
 		const activeSession = state.sessions.find((s) => s.sessionId === state.activeSessionId);
 		if (activeSession) {
 			// 从真实会话点顶部「新会话」：Codex 语义是以**当前对话**为模板，而不是回到后台 draft
@@ -573,6 +644,7 @@ export const useSessionsStore = create<SessionsStore>((set, get) => ({
 		// 与普通「＋」不同，项目行点击即使已经在 draft 页也是一次新的导航意图：
 		// 淘汰在途 open/create/fork，且换 generation，避免旧 cwd 的 promotion single-flight 被复用。
 		claimActivation();
+		noteUserIntent();
 		const existing = state.newSessionDraft;
 		draftGenerationSeq += existing ? 1 : 0;
 		const newSessionDraft = existing
@@ -607,6 +679,7 @@ export const useSessionsStore = create<SessionsStore>((set, get) => ({
 	switchSession: (sessionId) => {
 		// 同步导航：先领号，在途的 open/create/fork 全部作废（latest-wins 的另一半）
 		claimActivation();
+		noteUserIntent();
 		set((state) => {
 			const session = state.sessions.find((s) => s.sessionId === sessionId);
 			return {
@@ -617,7 +690,9 @@ export const useSessionsStore = create<SessionsStore>((set, get) => ({
 		});
 		// 懒加载兜底（D4）：目标会话无 transcript 数据时补拉四件套（从历史打开、
 		// 事件桥断连期间的切换等都经此路径自愈；已有数据零成本短路）
-		if (useTranscriptStore.getState().bySession[sessionId] === undefined) {
+		if (!isHistoryReady(sessionId) && hasPendingSessionHistory(sessionId)) {
+			void retrySessionHistory(sessionId);
+		} else if (useTranscriptStore.getState().bySession[sessionId] === undefined) {
 			void loadSessionBundle(sessionId).catch((error) => {
 				console.error("切换会话时补拉数据失败", error);
 				pushToast("warning", "toast.sessionOpenFailed", errText(error));
@@ -656,6 +731,10 @@ export const useSessionsStore = create<SessionsStore>((set, get) => ({
 			pushToast("warning", "toast.closeFailed", errText(error));
 			return { closed: false };
 		}
+		clearSessionHistory(sessionId);
+		const closedFile = get().sessions.find((s) => s.sessionId === sessionId)?.sessionFile;
+		if (closedFile) openInFlight.delete(closedFile.trim());
+		bundleInFlight.delete(sessionId); // 旧实例的迟到请求已由 openingEpoch 失效，新实例可独立装载
 		useTranscriptStore.getState().resetSession(sessionId);
 		set((state) => {
 			const closing = state.sessions.find((s) => s.sessionId === sessionId);
@@ -702,12 +781,16 @@ export const useSessionsStore = create<SessionsStore>((set, get) => ({
 	openFromHistory: async (filePath) => {
 		// 先领号再发请求：这次点击就是当前最新意图（同文件双击则第二次领号，自然胜出）
 		const token = claimActivation();
+		noteUserIntent();
 		const meta = await ensureOpenSession(filePath);
 		// 失败已由共享链报过一次；这里的提前返回同时保证不对用户的新选择做任何回滚
-		if (!meta || !isLatestActivation(token)) return;
+		if (!meta) return { ok: false };
+		// 迟到（用户已切走）：会话确实开起来了，但**不能抢焦点** —— 调用方据此只落数据
+		if (!isLatestActivation(token)) return { ok: true, latest: false, meta };
 		set({ activeSessionId: meta.sessionId, cwd: meta.cwd });
 		// 先记 cwd 再拉数据：即便随后装载失败，用户「在用哪个项目」的事实也已经成立
 		rememberCwd(meta.cwd);
+		return { ok: true, latest: true, meta };
 	},
 
 	forkSession: async (ref) => {
@@ -716,12 +799,18 @@ export const useSessionsStore = create<SessionsStore>((set, get) => ({
 		if (!activeSessionId) return undefined;
 		// 分叉成功会切到新会话 = 用户导航：先领号
 		const token = claimActivation();
+		noteUserIntent();
 		try {
 			const meta = await getPi().forkSession({ sessionId: activeSessionId, ref });
+			// fork 出的是用户刚开的新会话 → 记入临时工作区；迟到（已不是最新意图）只入列表，不抢 activeFile
+			const latest = isLatestActivation(token);
+			useSessionWorkspaceStore
+				.getState()
+				.addMember({ file: meta.sessionFile, sessionId: meta.sessionId }, { activate: latest });
 			set((state) => {
 				const sessions = [...state.sessions.filter((s) => s.sessionId !== meta.sessionId), meta];
 				// 迟到：新会话仍进 tabs，但不抢焦点
-				return isLatestActivation(token) ? { sessions, activeSessionId: meta.sessionId } : { sessions };
+				return latest ? { sessions, activeSessionId: meta.sessionId } : { sessions };
 			});
 			await loadSessionBundle(meta.sessionId);
 			// fork 事实已发生：即便已不是最新意图也要把新 id 交给调用方
@@ -874,3 +963,18 @@ export const useSessionsStore = create<SessionsStore>((set, get) => ({
 		}
 	},
 }));
+
+/**
+ * 工作区 `activeFile` 跟随当前会话：**唯一同步点**。
+ *
+ * activeFile 的语义是「重启后回到哪个成员」，所以只在当前会话确实是工作区成员时指向它；浏览新会话页、
+ * 只读子代理检视等非成员页面时落 null（spec）。它**只管指针，绝不在这里加成员** —— 内存策略的卸载/
+ * 重建、事件驱动的内部切换也会改 activeSessionId，订阅式加入会把用户已 × 掉的会话复活（spec 硬要求）。
+ *
+ * 放在本模块而不是 workspace 侧：依赖方向是 sessions → session-workspace，反向订阅会成模块环。
+ */
+useSessionsStore.subscribe((state, prev) => {
+	if (state.activeSessionId === prev.activeSessionId) return;
+	const { members, setActive } = useSessionWorkspaceStore.getState();
+	setActive(members.find((m) => m.sessionId === state.activeSessionId)?.file ?? null);
+});

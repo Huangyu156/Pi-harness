@@ -74,10 +74,9 @@ export function useComposerSend(options: UseComposerSendOptions) {
 		const pi = getPi();
 		switch (name) {
 			case "compact":
-				// 失败不在输入框上方报错：对话区压缩分割线（compaction_end error）已完整呈现
+				// 输入框上方不提醒（成功/失败都不提醒）：对话区的压缩分割线已经把「在干什么、成没成」说全了
 				try {
 					await pi.compact({ sessionId, customInstructions: arg || undefined });
-					showFeedback(t("slash.feedback.compacted"));
 				} catch {
 					// 静默，理由见上
 				}

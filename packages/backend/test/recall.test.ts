@@ -74,14 +74,38 @@ describe("压缩后的 UI 历史", () => {
 		sm.appendMessage({ role: "user", content: "压缩后消息", timestamp: 4 } satisfies Message);
 
 		const uiHistory = toBranchSessionMessages(sm.getBranch());
-		expect(uiHistory.map((message) => message.text)).toEqual([
-			"压缩前第一条",
-			"压缩前第二条",
-			"压缩前保留条目",
-			"压缩后消息",
+		// 压缩分割线也回放：位置 = compaction entry 在分支上的位置（即压缩真正发生的那一处），
+		// 旧消息一条不少（UI 历史不裁，只有模型上下文被裁）
+		expect(
+			uiHistory.map((message) => (message.role === "compaction" ? "「压缩分割线」" : message.text)),
+		).toEqual(["压缩前第一条", "压缩前第二条", "压缩前保留条目", "「压缩分割线」", "压缩后消息"]);
+		expect(uiHistory.filter((m) => m.role === "compaction")).toEqual([
+			{ role: "compaction", timestamp: expect.any(Number), summary: "模型上下文摘要", tokensBefore: 10_000 },
 		]);
 		// SDK 上下文确实已缩短，证明测试没有把两种数据源混为一谈。
 		expect(sm.buildSessionContext().messages.length).toBeLessThan(4);
+	});
+
+	it("多次压缩：每条 compaction entry 各产一条分割线，顺序与分支一致", () => {
+		const sm = SessionManager.inMemory();
+		sm.appendMessage({ role: "user", content: "a", timestamp: 1 } satisfies Message);
+		sm.appendCompaction("摘要一", sm.getLeafId() ?? "", 100);
+		sm.appendMessage({ role: "user", content: "b", timestamp: 2 } satisfies Message);
+		sm.appendCompaction("摘要二", sm.getLeafId() ?? "", 200);
+
+		const roles = toBranchSessionMessages(sm.getBranch()).map((m) =>
+			m.role === "compaction" ? m.summary : m.text,
+		);
+		expect(roles).toEqual(["a", "摘要一", "b", "摘要二"]);
+	});
+
+	it("压缩 entry 缺 summary/tokensBefore 时仍产分割线（字段不硬求）", () => {
+		const sm = SessionManager.inMemory();
+		sm.appendMessage({ role: "user", content: "a", timestamp: 1 } satisfies Message);
+		sm.appendCompaction("", "", undefined as unknown as number);
+
+		const divider = toBranchSessionMessages(sm.getBranch()).find((m) => m.role === "compaction");
+		expect(divider).toEqual({ role: "compaction", timestamp: expect.any(Number) });
 	});
 });
 

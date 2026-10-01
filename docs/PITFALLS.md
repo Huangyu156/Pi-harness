@@ -11,6 +11,8 @@
 | 全 app 卡死、日志/磁盘分钟级 GB 暴涨、renderer unresponsive | 一 · 0.4.6 冻结事故 |
 | 流式期间白屏、`error #185`、无限重渲染整树卸载 | 一 · 0.5.0 白屏事故；四 · Zustand selector（#185 另一成因） |
 | 点击对话里的相对文件链接后白屏 | 四 · Markdown 相对链接会导航 app 主窗口（2026-09-23） |
+| 比像素核验视觉时取样偏了、以为改动没生效 | 四 · CDP `clip.scale` 再乘一次 DPR（2026-09-29） |
+| 改了滚动条宽度但截图里看不到，以为没生效 | 四 · CDP 截图不绘制滚动条，只能力槽宽（2026-09-29） |
 | 扩展注册的工具模型用不了、模型说「工具列表为 none」 | 二 · createAgentSession tools 白名单 |
 | 设置页永久 Loading、模型列表为空 | 二 · runtime.refresh 网络挂起 / getAvailable 返回空 |
 | 权限 confirm 弹窗不生效 | 二 · bindExtensions 注入点 |
@@ -23,6 +25,7 @@
 | 新增 UI 文案只显示一种语言 | 四 · i18n 双字典 |
 | 凭证泄漏风险、密钥误提交 | 五 · 绝不打印/提交 API key |
 | LAN 页连接僵死不重连、状态「重连中/已连接」反复跳 | 二 · SSE 心跳必须是命名事件帧 |
+| 重开会话后某条 UI 痕迹没了（压缩分割线消失） | 二 · compaction entry 能回放，且它不存原因/压缩后估值（2026-09-29） |
 | LAN 对话页正文重复出现在末尾、run 结束又恢复正常 | 二 · 流式增量帧不可重放（healing 兜底差量） |
 | 流式输出时整个 Markdown 区域随 token 节奏闪烁、尾部文字半透明往上爬 | 四 · markstream fade 的临时合成层（已修：组件 API 关闭 fade） |
 | 代码块顶部两行无法拖选、标点偶发橙色框 | 四 · 悬浮 header 命中层 + Monaco Unicode 高亮 |
@@ -62,6 +65,9 @@
 | 组里最后一个展开的项目折不掉、切会话又自己展开（空数组身兼两义） | 四 · 空数组不能同时当「未初始化」与「有效空值」（2026-09-20） |
 | 打开模型选择器后整页向左偷跑、左栏与顶栏左侧按钮被挤/裁切 | 四 · absolute 弹层越界 + autoFocus = 整页横向偷跑（2026-09-20） |
 | CDP 量测得出「弹层在视口内、也没滚动」但界面明明错位（量错元素） | 四 · 同章节「量测三纪律」（2026-09-20） |
+| 进度条/比例条的渐变颜色跟着填充长度变（像被拉伸/压缩） | 四 · 渐变填充别直接改 `width`（2026-09-29） |
+| 自绘滑块在最低档时左半边有一道描边（填充的圆角帽露在滑块圆外） | 四 · 同章节「填充端要跟滑块圆对齐」（2026-09-29） |
+| 截图里自定义滚动条完全不出现，量 `offsetWidth - clientWidth` 又是 0 | 四 · headless 不绘制 `::-webkit-scrollbar`（2026-09-29） |
 | 量测脚本报「draft 没进左栏」，实际是我的选择器点到了分组头 | 四 · 同章节「量测三纪律」→ 侧栏行选择器（2026-09-20） |
 | 点一下历史会话行，它在左栏里跳到别处（卸载后又跳回） | 四 · 内存 meta 覆盖历史 meta = 排序键漂移到 createdAt（2026-09-20） |
 | 快速连点两行，界面停在先点的那一行（或过一会才被抢回） | 四 · 异步导航必须 latest-wins（令牌 + 共享 open pipeline）（2026-09-20） |
@@ -70,6 +76,7 @@
 | 新建的会话过一阵突然从左侧栏消失（点「＋」/重启后又回来） | 四 · 会话目录写穿：行存不存在不能依赖内存（2026-09-21） |
 | 左栏会话标题在项目目录名（如 `percho`）与首条用户消息之间反复切换 | 四 · 同章节「名称也要写回目录投影」（2026-09-22） |
 | 会话压缩后当时历史还在，过段时间重新打开却只剩压缩后的内容 | 四 · UI 历史不能读取被压缩的模型上下文（2026-09-22） |
+| 打开历史会话恰好收到频道唤醒，页面只剩唤醒后消息、磁盘历史还在 | 四 · 打开期间流式事件抢先建立 transcript，历史快照被丢弃（2026-09-29） |
 | 给 store 加模块级订阅后，某些入口报 `Cannot read properties of undefined (reading 'subscribe')` | 四 · 同章节「renderer 模块图不许有环」（2026-09-21） |
 | 反复被 GC 卸载的已置顶会话，顶栏胶囊也一起消失了 | 四 · 同章节「写穿」：胶囊与左栏同源（tabs → 目录兜底） |
 | MCP modern 服务器回 400 `-32602 ... missing the required per-request envelope key(s): _meta` | 六 · modern 探测请求必须自带 `_meta`（2026-09-30） |
@@ -160,6 +167,16 @@ LAN 页重连/中途进入时，快照种子经 `messagesToUIMessages` 重建—
 修复（2026-09-17，改 **skill 协议**而非代码）：跨会话协作改成**阶段门**——阶段边界 `git commit` + IMPL-NOTES + `channel_post`，然后**turn 必须结束**（不再调工具）；对方回话时实施已停手（turn 结束 → followUp 立即投递），工作区也静止（review 的回归结论可信）。见 `packages/desktop/resources/skills/channel-pickup/SKILL.md`「阶段门」节。
 
 **教训**：想让另一个会话及时收到消息，先看它的 turn 什么时候结束——`followUp` 的送达时机由**对方**的 turn 边界决定，不由发送方决定；要「立即送达」只有 `steer`（GUI 里用户自己发的消息目前也走 followUp 排队，`pi-backend.ts:572`）。所以「让双方停在同一节奏上」比引入锁/快照沙箱便宜得多。
+
+### compaction entry 能回放，且它不存原因/压缩后估值（2026-09-29）
+
+**通用教训**：只活在实时事件里的 UI 痕迹（压缩分割线、输入框上方的临时提醒）重开会话必然消失——回放只认会话树 entry。压缩分割线就是这个坑：`compaction_start/end` 事件产的那条线重开就没了，而磁盘上其实**一直有** `type:"compaction"` 的 entry 被回放函数 filter 掉了（`toBranchSessionMessages` 原来只收 `type === "message"`）。
+
+它的**位置天然正确**：`appendCompaction` 追加在当时 leaf 之后，所以按分支顺序把它插回消息流，分割线就落在"当时压缩的那一处"（实测 1833 条 entry 的分支上两条分别落在 145/1121、484/1121，前后消息 timestamp 单调）。
+
+**形状（SDK 0.84.3 实测 20 条）**：`{ type, id, parentId, timestamp(ISO 串), summary, firstKeptEntryId, tokensBefore, details:{readFiles,modifiedFiles}, usage, fromHook }`。**没有 `reason`**（手动/阈值/溢出都不记），**也没有压缩后估值**（`estimatedTokensAfter` 只在事件里）——所以回放的分割线只能显示「已压缩上下文 · 压缩前 156.4k」+ 可展开摘要（摘要是同一条字符串，展开内容与实时一致）。想与实时逐字一致（带原因 + `x → y`），只能自己在 `compaction_end` 时补写一条 `custom` entry（`appendCustomEntry` 不进 LLM 上下文，撤回标记 `message-recalled` 同款）。
+
+**加 role 的连带坑**：`SessionMessage` 新增 role 时，LAN 的 `sanitizeSessionMessage` 会把未知 role 落进最后那个 subagent 分支（`message.runs.map` 直接抛错）——新 role 必须在里面显式加分支。
 
 ### 长生命周期订阅不能挂在「可被自动 GC 的会话实例」上（2026-09-20，channel-watch retention + 持久补投）
 
@@ -267,7 +284,8 @@ pi SDK 必须声明进 `packages/desktop/package.json` dependencies（electron-b
 1. **`Page.captureScreenshot` 会把 hover 状态清掉**：截完图 `:hover` 链变空、目标元素的 `pointer-events` 回落 `none`（截图前读到的 `auto` 不再成立）。于是「hover → 截图 → 接着点它」的顺序会**静默落空**（点击落在 `pointer-events: none` 上，不报错也不生效）。
 2. **对同一坐标的 `mouseMoved` 不会重算 hover**：截图后想恢复 hover，直接再发一次相同坐标无效 —— 必须**先挪开一点（如 −60px）再挪回来**。
 3. `mousePressed` 与 `mouseReleased` 之间**贴太紧偶发不合成 `click`**，验证点击行为时中间留 ~70ms 更稳。
-4. **`mouseWheel` 的落点必须真的在目标容器上，且不能被刚弹出的浮层盖住**：右键菜单挂在指针处，紧接着朝“列表中心”派 wheel 很可能落在**菜单**上（菜单不可滚）→ 容器`scrollTop` 纹丝不动，看起来像“滚动了但菜单没关”的假失败。做法：先算出浮层矩形，再在目标容器里挑一个不被遮挡的点，并**同时断言容器 `scrollTop` 真的变了**（否则这条断言本来就不能判定）。实例：`scripts/check-sidebar-group-scroll.mjs` 的“滚动后菜单关闭”那一步。
+4. **合成 `mouseover` 会污染后续命中测试**：`dispatchEvent(new MouseEvent("mouseover"))` 派发的**合成**事件同样会把 `:hover` 链点亮，而且**不会自己消失** —— 后面用 `document.elementFromPoint()` 量「收起态覆盖层是否挡住正文」时，会误判成「挡住了」（实测：轨道项本来 24px 宽，却报 x=300 命中轨道）。做法：量命中区之前先对**所有**相关元素派发一次 `mouseout`（或等一次真实 `Input.dispatchMouseEvent` 把指针挪走），再读 `elementFromPoint`。
+5. **`mouseWheel` 的落点必须真的在目标容器上，且不能被刚弹出的浮层盖住**：右键菜单挂在指针处，紧接着朝“列表中心”派 wheel 很可能落在**菜单**上（菜单不可滚）→ 容器`scrollTop` 纹丝不动，看起来像“滚动了但菜单没关”的假失败。做法：先算出浮层矩形，再在目标容器里挑一个不被遮挡的点，并**同时断言容器 `scrollTop` 真的变了**（否则这条断言本来就不能判定）。实例：`scripts/check-sidebar-unified-scroll.mjs`（旧 `check-sidebar-group-scroll.mjs` 2026-09-29 随统一滚动改造替换）的“滚动后菜单关闭”那一步。
 
 ### 嵌套滚动的归属验证 + `overscroll-behavior: contain` 会吞掉滚轮（2026-09-21，左栏分组列表限高）
 
@@ -284,6 +302,8 @@ pi SDK 必须声明进 `packages/desktop/package.json` dependencies（electron-b
 
 做法：**`contain` 只在“确实会溢出”时才挂，且与该状态标记（如 `data-scrollable`）用同一个布尔值驱动**，别写两套判据（否则探针与真实行为会分叉）。溢出时需要 contain（边界不穿透），不溢出时必须让它为 `auto`（滚轮交给外层）。实测落地见 `components/sidebar/SidebarSessionList.tsx`。
 
+> **后续（2026-09-29，spec `sidebar-unified-scroll`）**：组内限高与嵌套滚动**整体删掉了**（用户反馈「滚到自己组边界还要把指针挪到项目标题上才能继续」），现在左栏只有**一个**外层滚动容器，分组改为「默认 6 条 + 末尾『显示更多』每次 +16」（`lib/sidebar-visible-count.ts`，次数只在内存）。于是上面那套 contain 判据连同 `SidebarSessionList` 的限高/淡出/自身滚动一起消失——本条留作**通用知识**：以后任何时候想给「可能不溢出」的容器挂 `overscroll-behavior: contain`，先想清楚滚轮被吞的代价。新的验收脚本 `scripts/check-sidebar-unified-scroll.mjs` 会直接断言「主体内 0 个自己还能滚的元素」。
+
 **验证滚动归属的三条纪律**（都真踩过）：
 
 1. **不能拿「直接赋 `scrollTop`」冒充滚动**：它绕过滚动链，结论必然假绿。真实 wheel 用 `Input.dispatchMouseEvent({ type: "mouseWheel", deltaY })`（先 `mouseMoved` 到目标上——命中区决定滚动链）。赋 `scrollTop` 只用来把容器**预置**到中部/底部。
@@ -297,6 +317,20 @@ pi SDK 必须声明进 `packages/desktop/package.json` dependencies（electron-b
 - **`Browser.setWindowBounds` / `Browser.getWindowForTarget` 在 Electron 下未实现**（method not found）。想真改窗口尺寸就用页面里的 `window.resizeTo(w, h)` —— Electron 支持，`window.innerWidth` 会真的变（本任务用它验了右栏 push ↔ 浮层的 1100 / 1000 / 900 三档）。
 - **CDP 注入的鼠标事件不会驱动 `-webkit-app-region: drag` 的窗口拖拽**：程序化拖不动窗口（连改造前就存在的顶栏拖拽区也拖不动），所以「无边框窗口的自定义拖拽带还能不能拖」**只能人工确认**；脚本只能验到 `getComputedStyle(el).webkitAppRegion === "drag"` 且元素尺寸非零。
 - `Input.dispatchMouseEvent` 坐标是**视口 CSS px**；`Page.captureScreenshot` 的 `clip` 也是 CSS px，输出像素 = clip × DPR。
+- **CDP 键盘事件要触发原生 `<button>` 激活，必须 `type: "keyDown"` 且带 `text`**（2026-09-29 实测，验「行末『显示更多』按钮能用 Enter 触发」时踩到）：
+  Enter → `{ type: "keyDown", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13, text: "\r", unmodifiedText: "\r" }` + `keyUp`；
+  只发 `rawKeyDown` 会**照常派发 keydown 事件落到监听器上、但不产生 click**（页面里能收到 `keydown:Enter`，行为却像没按），看着像「按钮坏了」。
+  Space 同样要给 `text: " "`。验证键盘可达性时别忘了分两步断言：**能聚焦**（`el.focus()` 后 `document.activeElement === el`，折叠态 `inert` 下应为 false）与**能触发**。
+
+### CDP 截图不绘制滚动条：只能力槽宽（2026-09-29）
+
+`::-webkit-scrollbar` 宽度改小（8px → 4px）后 CDP 截图里**看不到任何滚动条**，一度以为改动没生效。做了对照：临时往页面塞一个 `overflow-y: scroll` + `thin-scrollbar` 的 div，槽宽量到 4px，**截图里同样不画**——所以这是截图/合成器不绘制滚动条层，不是改动问题（与 headless 画板那次同一个坑）。判据用 `el.offsetWidth - el.clientWidth`：带类 4、去掉类 8，两次都在真机（dev 窗口）上量。
+
+### CDP `clip.scale` 是**再**乘一次 DPR：输出像素 = clip × scale × DPR（2026-09-29）
+
+比像素做视觉核验（强度/亮度/对齐）时踩过：`clip: { width: 300, height: 112, scale: 2 }` 在本机（DPR 2）拿到的是 **1200×448**，即 4x——按 2x 反推 CSS 坐标会让取样带整体偏移，看上去像"遮罩没生效"。要么统一 `scale: 1`（输出 = 2x，CSS 像素 × 2），要么把换算写成 `clip × scale × devicePixelRatio` 并断言一次实际尺寸。
+
+顺带一条可比对的核验手法：**同一滚动位置、同一 clip，只切被测属性（如 `dataset.fadeTop` 置 false），逐行取均值比亮度差**——比人眼看截图可靠（实测淡出带内 +24.9，带外 +0.0）。
 
 ### Tailwind 4 的 `rotate-*` 走 CSS `rotate` 属性，不是 `transform`（2026-09-19）
 
@@ -531,6 +565,14 @@ pi SDK 必须声明进 `packages/desktop/package.json` dependencies（electron-b
 - **滚动/改变窗口尺寸就关菜单**（而不是重定位）：祖先滚动容器可能有很多层，跟踪成本远大于收益；不关会「菜单挂在原地、触发元素跑了」。
 - `preventDefault()` 在 `contextmenu` 里必写（否则同时弹系统菜单）；dnd-kit 的 `PointerSensor` 只认主键，右键不会误触发拖拽。
 
+### dev 改 store 后「界面没反应」：HMR 重建了 zustand 模块实例（2026-09-28，session-workspace 阶段 3）
+
+症状：dev 里改完 `stores/*.ts` 继续手验，**点了会话说「不出胶囊」**、点 × 没反应、组件像是拿到了空状态 —— 但代码与单测都对，重启 dev 后一切正常。
+
+原因：Vite HMR 让 store 模块**重新求值**，于是产生了**新的** zustand store 实例；旧实例上已经写进去的状态（成员表、`activeSessionId` 订阅等）留在旧闭包里，而 React 组件被新模块重新渲染后订阅的是新实例 → 看起来「状态凭空丢了」。订阅式接线（`useSessionsStore.subscribe(...)` 这类模块级副作用）也会被重新注册一遍。
+
+做法：**任何 store/接线改动后的手验，先整体重启 dev（杀掉 electron-vite 与 Electron 再起），不要在 HMR 后的页面上判断功能对错**；CDP 验收脚本也应在重启后的干净页面跑。判断当前页是不是被 HMR 污染过：看 dev 日志有没有 `hmr update` 记录（或直接重来一次）。
+
 ### 内存 meta 覆盖历史 meta = 排序键漂移到 createdAt，行会“自己跳”（2026-09-20，sidebar-session-switch-stability）
 
 症状：点开左栏某条历史会话，那一行**当场移到别处**（项目里第 3 行 → 第 22 行）；等它被自动卸载（或关掉再开另一个），又跳回原位。用户描述成“点一下行就乱跳”。
@@ -578,6 +620,14 @@ pi SDK 必须声明进 `packages/desktop/package.json` dependencies（electron-b
 
 复现手法（可复用）：dev 实例 + CDP 直接驱 store 走真实入口（`.local/dev-logs/repro-session-catalog.mjs`）：`createSession()`（真实 promotion）→ `activateNewSessionDraft()` 切走 → `unloadSession(id)`（GC 真实入口）→ 断言 `inMemory=false` 但 `inCatalog=true` 且 `document.querySelector('[data-session-id=…]')` 仍在。**侧栏按组渲染，断言前要先展开该会话所在项目的组**（`setExpandedGroups([...groups, cwd])`），否则“行不在 DOM 里”是假阴性。
 
+### 打开期间流式事件抢先建立 transcript，历史快照被丢弃（2026-09-29，已修）
+
+症状：打开一条有大量历史的会话后，页面最上面是刚收到的频道唤醒，上滑到顶也没有更早消息；JSONL 历史仍完整。这与 compaction 裁模型上下文**无关**。实证：会话 `01a0d12b` 当前分支有 346 条 message entry、零 compaction；截图顶端的 09:41:17 消息在 JSONL 第 367 行，前面有 36 条 user、126 条 assistant。正式版日志显示 09:41:17.305 channel-watch 投递唤醒，09:41:17.335 后端才报 session opened；trace 记录此后响应事件。
+
+根因：`stores/sessions.ts` 的 `loadSessionBundleInner` 在历史 IPC 开始前以 `skipHistoryIfLive` 判断是否跳过，返回后又以 `liveNow` 判断是否丢弃历史。会话打开时频道扩展可能先唤醒 agent，事件桥建立了该 session 的 live transcript；于是历史即便读到了，也被 `if (history && !liveNow)` 丢弃。之后 live 事件只追加本次打开以来的新消息，结束时没有历史补拉；`switchSession` 只在 transcript **不存在**时懒加载，切回来也不会自愈。trace 不记录 `getSessionMessages` IPC，无法单独从 trace 断言哪一次守卫命中，但事件时序、截图起点与代码路径吻合。已知恢复手段：会话空闲后关闭并重新打开（或退出应用重进），让首次历史加载在无 live 竞态时完成；**不要删/改会话 JSONL**。
+
+修复（分支 `fix/session-history-hydration-barrier`）：`channel-watch` 恢复订阅时不立即启 watcher/离线对账，而是异步等 renderer 首份完整历史回放的 `session:historyReady` ACK（不能在 SDK `session_start` 中 await ACK，会与 `openSession` 死锁）；等待中 cursor 不推进，15s 无 renderer 兜底放行、关闭作废；SDK `dispose()` 不发送 `session_shutdown`，backend 须显式停 watcher（只用 SDK 钩子会漏）。其他来源仍可能抢跑：renderer `stores/session-history.ts` 明确区分「有 live entry」与「历史已就绪」，agent_settled 后重新读最新分支（旧快照不可复用），openingEpoch 防止关闭重开被旧结果覆盖；切回待补会话也会重试。覆盖频道 ACK 前/后/关闭、live 抢跑/IPC 途中抢跑/关后同 ID 重开。频道订阅的后台会话并不依赖用户**正在查看**，只等初始化完成。
+
 ### UI 历史不能读取被压缩的模型上下文（2026-09-22）
 
 症状：执行 compaction 后，当前界面的旧消息仍完整；过一段时间切走再回来，压缩前的大段内容却消失。目标会话文件有 1319 行、当前分支 1253 条 message entry，但两次压缩后 `AgentSession.messages` 只剩 251 条上下文消息；日志中的 GC close/open 正好对应“过段时间”这个触发点。
@@ -585,6 +635,30 @@ pi SDK 必须声明进 `packages/desktop/package.json` dependencies（electron-b
 根因：实时 `compaction_end` 已刻意只追加分割线、不重置 UI，所以当下正常；但 GC 卸载再打开时，`getSessionMessages()` 错把 `AgentSession.messages` 当历史数据源。这个属性是**给模型下一轮请求使用的裁剪上下文**，不是完整会话历史。完整历史一直在 JSONL 会话树当前分支里，并未丢失。
 
 对策：UI 回放统一读取 `sessionManager.getBranch()` 的全部 `message` entry，再转换并配对 entryId；模型调用仍使用 SDK 自己的 `session.messages`，两种语义不混用。文件只读透视也复用同一个 branch 转换函数。回归测试必须真实插入 compaction entry，并证明模型上下文缩短的同时 UI 历史仍包含压缩前消息。
+
+### 渐变填充条：改 `width` 会把 `linear-gradient` 一起拉伸（2026-09-29）
+
+症状：思考深度横条（模型弹层底部）要「左端蓝、右端紫」，按老写法 `width: 计算值` + `background: linear-gradient(...)`，拖动滑块时**同一条刻度下的颜色会变**——短填充把整条渐变压进一小段、长填充才铺开，看着像颜色自己在动。
+
+原因：`linear-gradient` 按元素自身盒子铺，元素宽度变了渐变比例就跟着变。
+
+做法：渐变层**铺满整条轨道**（`inset: 0`），用 `clip-path: inset(0 calc(100% - var(--fillw)) 0 0)` 裁出填充宽度（见 `styles/globals.css` 的 `.think-fill`）。适用于进度条 / 比例条 / 分段高亮。验证注意：`getBoundingClientRect()` 拿的是**未裁剪**的盒子（裁剪不影响布局），所以量宽度证明不了裁剪生效，得看截图或读 `clip-path` 计算值。
+
+**2026-09-29 补（填充端要跟滑块圆对齐）**：思考条把「填充铺到滑块中心」当成终点，最低档就露馅——滑块中心在 13px（半个滑块）处，那 13px 填充的**圆角左帽**露出滑块圆外（滑块只盖 x∈[0,26] 的圆内区域），看着像滑块左半边有道渐变描边。三条路只有一条对：
+
+1. 填充铺到**滑块中心**（`calc((100% - 26px) * pos + 13px)`）：方角边界恰好切在滑块圆最宽处、被盖住 ✅ ——但 **最低档（pos=0）必须特判成 0 宽**，否则就是上面那半截月牙；
+2. 想靠「补一整个滑块宽（+26px）让右端与滑块同心」绕开特判 ❌：`border-radius` 打在**整条宽度**的元素上，`clip-path` 裁开后右端仍是**方角**，补多少就露多少方块到滑块右边（实测拍到了清晰的蓝色方块）；
+3. 靠 `border-radius` 让右端成圆角 ❌：圆角帽会从滑块圆里拱出来（就是最低档那个月牙）。
+
+判据：填充端是方角时，端点必须落在**滑块圆的最宽处**（= 滑块中心）；只要偏离，圆/方角都会露出滑块。
+
+### headless 截图不绘制 `::-webkit-scrollbar`（2026-09-29）
+
+症状：设计稿/验收截图里自定义滚动条（`.thin-scrollbar` 4px、全局 8px）完全不出现；量 `offsetWidth - clientWidth` 有的 0、有的正好 4px，容易误判「样式没生效」。
+
+原因：macOS「滚动时才显示」策略下 Chromium 走 overlay 滚动条；`::-webkit-scrollbar` 的宽度只影响 `scrollbar-gutter: stable` 预留的宽度，thumb 本身不画（没滚动时也不显示）。Electron 真窗口里才是经典滚动条（用户截图里那根粗灰条就是）。
+
+做法：截图核对滚动条时，要么在画板里手绘一根同规格的示意（`.local/design/ux/model-thinking-picker` 的画板 ⑤ 就这么干的），要么量 `offsetWidth - clientWidth`（`4px` = 生效）+ 真窗口肉眼确认。别据此判定样式坏了。
 
 ## 五、工程纪律
 
